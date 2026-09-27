@@ -1,0 +1,17 @@
+{
+	"name" : "OmniAI",
+	"description" : "OmniAI is an adventure-map artificial intelligence (AI) for VCMI and DMB. It scores every visitable object on the map, checks the strength of any guarding army before committing a hero, moves whole multi-tile paths per turn, recruits at dwellings and in towns, hires heroes at taverns, and scales its search depth to the map difficulty. Combat is left to the engine's BattleAI. Enable the Learning submod below to let OmniAI carry what it learns from one game into the next.",
+	"version" : "0.1.0",
+	"author" : "OmniAI project",
+	"contact" : "",
+	"modType" : "AI",
+	"compatibility" : {
+		"min" : "1.7.0"
+	},
+	"aiPlugin" : {
+		"library" : "OmniAI",
+		"name" : "OmniAI",
+		"kinds" : [ "adventure" ],
+		"builtFor" : "0.1.0"
+	}
+}

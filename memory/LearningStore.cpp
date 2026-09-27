@@ -10,6 +10,9 @@
 #include "json/JsonNode.h"
 #include "mapping/CMapHeader.h"
 #include "modding/CModHandler.h"
+#ifdef OMNIAI_IN_TREE
+#include "VCMIDirs.h"
+#endif
 
 #include <filesystem>
 #include <fstream>
@@ -92,6 +95,10 @@ namespace
 
 	std::string userDataDir()
 	{
+#ifdef OMNIAI_IN_TREE
+		// Built with the engine (as DMB builds it): the engine's own user folder.
+		return VCMIDirs::get().userDataPath().string();
+#else
 		PWSTR docs = nullptr;
 		if(SUCCEEDED(SHGetKnownFolderPath(FOLDERID_Documents, 0, nullptr, &docs)))
 		{
@@ -100,6 +107,7 @@ namespace
 			return p.string();
 		}
 		return {};
+#endif
 	}
 
 	/// The folder memory.json lives in: the one set through setDir (OmniAI's

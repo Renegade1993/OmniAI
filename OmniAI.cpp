@@ -46,6 +46,9 @@
 #include "mapObjects/CGDwelling.h"
 #include "mapObjects/CGMarket.h"
 #include "mapObjects/MiscObjects.h"
+#ifdef OMNIAI_IN_TREE
+#include "VCMIDirs.h"
+#endif
 #include "mapObjects/CQuest.h"
 #include "mapObjects/IMarket.h"
 #include "entities/building/CBuilding.h"
@@ -149,6 +152,12 @@ namespace
 		// watch_match.py sets OMNIAI_DIR to a folder inside that copy.
 		if(const char * own = std::getenv("OMNIAI_DIR"); own && *own)
 			return own;
+#ifdef OMNIAI_IN_TREE
+		// Built with the engine (as DMB builds it): the engine's own user folder,
+		// which its dirs.json decides. DMB's client also hands this folder over as
+		// OMNIAI_DIR; this covers a server something else started.
+		return (VCMIDirs::get().userDataPath() / "OmniAI").string();
+#else
 		PWSTR docs = nullptr;
 		if(SUCCEEDED(SHGetKnownFolderPath(FOLDERID_Documents, 0, nullptr, &docs)))
 		{
@@ -158,6 +167,7 @@ namespace
 			return d.string();
 		}
 		return {};
+#endif
 	}
 
 	/// Of the heroes a tavern offers, the one bringing the most army. A hire

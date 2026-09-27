@@ -141,6 +141,9 @@ target_include_directories(OmniAI PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
 if(VCMI_IN_TREE)
 	vcmi_set_output_dir(OmniAI "AI")
 	enable_pch(OmniAI)
+	# Built with the engine: default to the engine's own user folder (VCMIDirs) when
+	# OMNIAI_DIR is unset. The standalone build keeps the Documents known-folder lookup.
+	target_compile_definitions(OmniAI PRIVATE OMNIAI_IN_TREE)
 endif()
 
 # Standalone unit canaries: exercise the memory and net subsystems against
