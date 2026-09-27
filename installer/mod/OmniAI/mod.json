@@ -1,0 +1,11 @@
+{
+	"name" : "OmniAI",
+	"description" : "OmniAI is an adventure-map artificial intelligence (AI) plugin for VCMI. It scores every visitable object on the map, checks the strength of any guarding army before committing a hero, moves whole multi-tile paths per turn, recruits at dwellings and in towns, hires heroes at taverns, and scales its search depth to the map difficulty. Combat is delegated to the engine's BattleAI. Enable the Learning submod below to let OmniAI carry what it learns from one game into the next. This mod entry registers OmniAI in the launcher and hosts that toggle; the engine loads the AI itself from OmniAI.dll in the VCMI AI folder, selected by the adventureEnemyAI and adventureAlliedAI keys in settings.json.",
+	"version" : "0.1.0",
+	"author" : "OmniAI project",
+	"contact" : "",
+	"modType" : "AI",
+	"compatibility" : {
+		"min" : "1.7.0"
+	}
+}

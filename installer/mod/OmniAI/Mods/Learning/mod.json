@@ -1,0 +1,12 @@
+{
+	"name" : "Learning",
+	"description" : "Persistent cross-game learning for OmniAI. With this enabled, OmniAI reads and writes Documents/My Games/vcmi/OmniAI/memory.json, so it carries three things between sessions: how much each kind of map object turned out to be worth, a self-tuned threshold for how much stronger a guard has to be before a fight is refused, and which one-shot objects such as witch huts and shrines it has already used up. Turn this off to freeze learning without losing the file. Delete memory.json to reset a trained AI back to defaults. Off by default, because a trained AI plays differently from a fresh one and that should be a deliberate choice.",
+	"version" : "1.0.0",
+	"author" : "OmniAI project",
+	"contact" : "",
+	"modType" : "AI",
+	"keepDisabled" : true,
+	"compatibility" : {
+		"min" : "1.7.0"
+	}
+}

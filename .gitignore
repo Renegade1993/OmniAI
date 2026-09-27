@@ -1,0 +1,33 @@
+# OmniAI's ignore list, drafted 2026-09-26 for K's GitHub decision (OmniAI Opus).
+# The source, tests, CMake files, installer scripts and the mod's JSON stay in;
+# everything built, learned or logged stays out.
+
+# Build output (build.bat builds into build\)
+build/
+*.obj
+*.pdb
+*.ilk
+*.exp
+*.lib
+
+# Built DLLs: attach them to a GitHub release instead of committing them.
+# This covers OmniAI_baseline_*.dll and the installer's AI\OmniAI.dll and tbb12.dll.
+*.dll
+
+# Learned memory, decision logs and pause files: per player, never source.
+memory.json
+memory.json.bak
+decisions-*.log
+decisions-*.jsonl
+PAUSE
+
+# The unit test's scratch folder, if a run is interrupted before it cleans up.
+omniai_test_learning/
+
+# The installer's payload is assembled by installer/build_installer.py from a
+# built DLL and installer/mod/; ship the assembled folder, commit the source.
+installer/payload/
+
+# Python bytecode from the installer's builder.
+__pycache__/
+*.pyc
