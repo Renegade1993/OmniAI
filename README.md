@@ -8,8 +8,8 @@ it in. Battles are left to VCMI's own BattleAI.
 
 ## Building
 
-Inside the DMB fork of VCMI, this repository is the `AI/OmniAI` submodule and builds with the
-engine; nothing else is needed.
+Inside a VCMI 1.7.5 source tree, place this repository at `AI/OmniAI` and add it to
+`AI/CMakeLists.txt` (`add_subdirectory(OmniAI)`); it builds with the engine and needs nothing else.
 
 On its own, against a released VCMI 1.7.5 on Windows:
 
