@@ -25,8 +25,10 @@ The unit tests build as `omniai_tests` in the same tree; `run_tests.ps1` runs th
 
 ## Installing into stock VCMI
 
-`installer/README.txt` covers the installer, which copies the plugin into a VCMI install and adds
-the OmniAI entry to the mod launcher.
+The latest release carries a ready installer: download `OmniAI-0.1.0-installer.zip` from
+[Releases](https://github.com/Renegade1993/OmniAI/releases/latest), unzip it, close VCMI and run
+`Install OmniAI.bat`. `installer/README.txt` covers the installer, which copies the plugin into a
+VCMI install and adds the OmniAI entry to the mod launcher.
 
 ## Settings
 
