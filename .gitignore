@@ -31,3 +31,6 @@ installer/payload/
 # Python bytecode from the installer's builder.
 __pycache__/
 *.pyc
+
+# Internal team notes, logs and design directives: never public.
+\! LLM Files/
