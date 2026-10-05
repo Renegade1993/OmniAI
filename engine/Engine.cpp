@@ -760,6 +760,50 @@ std::vector<Option> Engine::scoreOptions(const std::vector<Target> & targets)
 		}
 	}
 
+	// A hero with nothing worth doing goes to the nearest town of ours: it
+	// adds to the town's defence, and it is where the next courier job starts.
+	// Idle heroes were 4 to 7 percent of all hero-days (V2M1F, V2M1I).
+	{
+		std::set<int32_t> withJob;
+		for(const Option & o : options)
+			withJob.insert(o.hero);
+		for(const CGHeroInstance * hero : cb.getHeroesInfo())
+		{
+			if(!hero || withJob.count(hero->id.getNum()) || hero->movementPointsRemaining() <= 0
+				|| doneToday_.count(hero->id.getNum()) || ourTowns.count(hero->visitablePos()))
+				continue;
+			const auto shared = host_.paths(hero);
+			if(!shared)
+				continue;
+			double bestDays = 1e9;
+			size_t bestTarget = targets.size();
+			for(size_t i = 0; i < targets.size(); ++i)
+			{
+				if(targets[i].kind != Target::Kind::OwnTown || blocked_.count({hero->id.getNum(), targets[i].tile}))
+					continue;
+				const CGPathNode * node = shared->getPathInfo(targets[i].tile);
+				if(!node || !node->reachable())
+					continue;
+				const double d = double(node->turns) + std::clamp(1.0 - double(node->moveRemains)
+					/ double(std::max(1, hero->movementPointsLimit(true))), 0.0, 1.0);
+				if(d < bestDays)
+				{
+					bestDays = d;
+					bestTarget = i;
+				}
+			}
+			if(bestTarget < targets.size())
+			{
+				Option o;
+				o.hero = hero->id.getNum();
+				o.target = bestTarget;
+				o.days = bestDays;
+				o.score = 1e-6;
+				options.push_back(o);
+			}
+		}
+	}
+
 	// A town under threat calls the main hero home, whatever else is on offer.
 	const CGHeroInstance * main = mainHero_ >= 0 ? cb.getHero(ObjectInstanceID(mainHero_)) : nullptr;
 	if(main && main->movementPointsRemaining() > 0 && !doneToday_.count(mainHero_))
@@ -912,7 +956,7 @@ bool Engine::execute(const std::vector<Option> & plan, const std::vector<Target>
 		lastTile_[o.hero] = t.tile;
 		if(hero->visitablePos() == t.tile && t.kind == Target::Kind::Visit)
 			visited_[{o.hero, t.tile}] = day_;
-		if(hero->visitablePos() == t.tile && t.kind == Target::Kind::OwnTown && o.hero != mainHero_)
+		if(hero->visitablePos() == t.tile && t.kind == Target::Kind::OwnTown && o.hero != mainHero_ && o.reward > 0.0)
 			if(const auto * town = dynamic_cast<const CGTownInstance *>(cb.getObj(t.id, false)))
 			{
 				host_.logLine("   V2 COURIER " + hero->getNameTranslated() + " takes the garrison of "
