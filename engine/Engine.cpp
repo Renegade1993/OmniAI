@@ -644,6 +644,9 @@ bool Engine::scoreOne(const CGHeroInstance * hero, const CPathsInfo * paths, con
 			reward = host_.worth(obj, hero);
 			if(reward <= 0.0)
 				return false;
+			// Holding no town, a town is the game itself.
+			if(cb.getTownsInfo().empty())
+				reward = std::max(reward, 10.0 * armyOf(hero)) + 100000.0;
 			const auto * town = dynamic_cast<const CArmedInstance *>(obj);
 			if(town && town->getArmyStrength() > 0)
 			{
@@ -744,7 +747,10 @@ std::vector<Option> Engine::scoreOptions(const std::vector<Target> & targets)
 		for(size_t i = 0; i < targets.size(); ++i)
 		{
 			const Target & t = targets[i];
-			if(!ourTowns.count(t.tile) && t.kind != Target::Kind::EnemyHero
+			// Without a town the game is lost in seven days: any town is worth
+			// the risk, so the danger rule does not hold heroes back from one.
+			const bool townless = ourTowns.empty() && t.kind == Target::Kind::EnemyTown;
+			if(!ourTowns.count(t.tile) && t.kind != Target::Kind::EnemyHero && !townless
 				&& dangerousFor(hero, t.tile, foes))
 				continue;
 			Option o;
