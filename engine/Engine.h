@@ -115,6 +115,7 @@ private:
 	std::set<int32_t> doneToday_;                    // heroes that cannot act again today
 	std::map<int32_t, int> noMoves_;                 // walks sent today that moved nothing, per hero
 	std::map<std::pair<int32_t, int3>, int> visited_; // hero/tile visits made, by day
+	std::map<int32_t, int> gatherFailed_;            // hero -> day its hand-over to the main hero moved nothing
 	int movesToday_ = 0;
 	std::set<int> monsterLogDay_;
 	std::vector<std::vector<uint8_t>> visLevels_;   // tiles seen this pass, per level

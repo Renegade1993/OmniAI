@@ -297,6 +297,14 @@ std::vector<Target> Engine::proposeTargets()
 			const double army = armyOf(h);
 			if(army < std::max(300.0, 0.08 * armyOf(main)))
 				continue;
+			// A hand-over that moved nothing (the main hero's seven slots hold
+			// other creatures, and none of ours beats its weakest) benches the
+			// job for three days; otherwise it wins every pass and the hero
+			// stands beside the main hero all day (V2M1S map 16, days 26 to 45:
+			// three heroes, 15 passes a day, the same 26636 never handed over).
+			const auto failed = gatherFailed_.find(h->id.getNum());
+			if(failed != gatherFailed_.end() && day_ - failed->second < 3)
+				continue;
 			Target t;
 			t.kind = Target::Kind::Gather;
 			t.id = main->id;
@@ -838,6 +846,15 @@ std::vector<Option> Engine::scoreOptions(const std::vector<Target> & targets)
 			{
 				if(targets[i].kind != Target::Kind::OwnTown || blocked_.count({hero->id.getNum(), targets[i].tile}))
 					continue;
+				// A gate another of ours already stands in cannot be entered: the
+				// walk ends beside it, and the hero tried again every pass (V2M1S
+				// map 07 day 42: Elleshar 12 passes, then Wystan 18, one step each).
+				bool gateTaken = false;
+				for(const CGHeroInstance * other : cb.getHeroesInfo())
+					if(other && other != hero && other->visitablePos() == targets[i].tile)
+						gateTaken = true;
+				if(gateTaken)
+					continue;
 				const CGPathNode * node = shared->getPathInfo(targets[i].tile);
 				if(!node || !node->reachable())
 					continue;
@@ -1036,9 +1053,17 @@ bool Engine::execute(const std::vector<Option> & plan, const std::vector<Target>
 			if(main && main->visitablePos().z == hero->visitablePos().z
 				&& chebyshev(main->visitablePos(), hero->visitablePos()) <= 1)
 			{
+				const double carried = armyOf(hero);
 				host_.logLine("   V2 GATHER " + hero->getNameTranslated() + " hands "
-					+ fmt0(armyOf(hero)) + " to " + main->getNameTranslated());
+					+ fmt0(carried) + " to " + main->getNameTranslated());
 				host_.giveArmy(hero, main);
+				const CGHeroInstance * after = cb.getHero(ObjectInstanceID(o.hero));
+				if(after && armyOf(after) > 0.9 * carried)
+				{
+					host_.logLine("   V2 GATHER refused: " + after->getNameTranslated() + " still carries "
+						+ fmt0(armyOf(after)) + ", no gather for three days");
+					gatherFailed_[o.hero] = day_;
+				}
 			}
 		}
 	}
