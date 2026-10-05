@@ -10821,7 +10821,9 @@ void OmniAI::showBlockingDialog(const std::string &text, const std::vector<Compo
 				// (81 of our 108 chests over 120 duel-v2 games), mostly on
 				// collectors, while the town ran short of gold.
 				const bool fighter = v->id.getNum() == fieldHeroId_ || v->id.getNum() == secondFieldId_;
-				if(fighter && gold >= need + GameConstants::HERO_GOLD_COST)
+				// Under the v2 engine the main hero always takes the experience, as
+				// Nullkiller's does: its level multiplies every stack it commands.
+				if(fighter && (engineV2_ || gold >= need + GameConstants::HERO_GOLD_COST))
 					answer = expIdx + 1;
 				decisionLog_->line(std::string("  CHEST ") + v->getNameTranslated() + " takes "
 					+ (answer == expIdx + 1 ? "experience" : "gold") + " (gold "
