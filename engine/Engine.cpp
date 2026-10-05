@@ -255,17 +255,19 @@ void Engine::proposeExplore(std::vector<Target> & out, double knownValue)
 	CCallback & cb = host_.game();
 	const int3 size = cb.getMapSize();
 	const int W = size.x, H = size.y;
-	std::vector<std::vector<uint8_t>> visLevels(size.z, std::vector<uint8_t>(W * H, 0));
+	visLevels_.assign(size.z, std::vector<uint8_t>(W * H, 0));
 	int visible = 0;
 	for(int z = 0; z < size.z; ++z)
 		for(int y = 0; y < H; ++y)
 			for(int x = 0; x < W; ++x)
 				if(cb.isVisible(int3(x, y, z)))
 				{
-					visLevels[z][y * W + x] = 1;
+					visLevels_[z][y * W + x] = 1;
 					++visible;
 				}
+	const auto & visLevels = visLevels_;
 	const double density = std::clamp(0.5 * knownValue / std::max(1, visible), 5.0, 60.0);
+	density_ = density;
 	const int R = 5;
 	for(int z = 0; z < size.z; ++z)
 	{
@@ -421,6 +423,64 @@ double Engine::visitValue(const CGObjectInstance * obj, const CGHeroInstance * h
 	return value;
 }
 
+double Engine::gateValue(const CPathsInfo * paths, const int3 & guard)
+{
+	// A guard that stands in a passage is worth the ground it shuts off. From
+	// the guard's tile, count the open or unseen tiles the hero cannot reach
+	// today (the far side), flooding outward through such tiles and stopping
+	// at ground the hero can already reach. A roadside stack with reachable
+	// ground all round opens nothing.
+	if(!paths || visLevels_.empty() || guard.z < 0 || guard.z >= int(visLevels_.size()))
+		return 0.0;
+	CCallback & cb = host_.game();
+	const int3 size = cb.getMapSize();
+	const int W = size.x, H = size.y;
+	const std::vector<uint8_t> & vis = visLevels_[guard.z];
+	auto reachable = [&](const int3 & p)
+	{
+		const CGPathNode * n = paths->getPathInfo(p);
+		return n && n->reachable();
+	};
+	auto open = [&](const int3 & p)
+	{
+		if(!vis[p.y * W + p.x])
+			return true;   // unseen: counted as open ground
+		const TerrainTile * t = cb.getTile(p, false);
+		return t && !t->blocked() && !t->isWater();
+	};
+	std::vector<int3> frontier;
+	std::set<int3> seenSet;
+	seenSet.insert(guard);
+	for(int dy = -1; dy <= 1; ++dy)
+		for(int dx = -1; dx <= 1; ++dx)
+		{
+			const int3 q(guard.x + dx, guard.y + dy, guard.z);
+			if((dx || dy) && q.x >= 0 && q.y >= 0 && q.x < W && q.y < H && !reachable(q) && open(q))
+			{
+				frontier.push_back(q);
+				seenSet.insert(q);
+			}
+		}
+	int count = 0;
+	constexpr int LIMIT = 600;
+	for(size_t i = 0; i < frontier.size() && count < LIMIT; ++i)
+	{
+		const int3 p = frontier[i];
+		++count;
+		for(int dy = -1; dy <= 1; ++dy)
+			for(int dx = -1; dx <= 1; ++dx)
+			{
+				const int3 q(p.x + dx, p.y + dy, p.z);
+				if((!dx && !dy) || q.x < 0 || q.y < 0 || q.x >= W || q.y >= H || seenSet.count(q))
+					continue;
+				seenSet.insert(q);
+				if(!reachable(q) && open(q))
+					frontier.push_back(q);
+			}
+	}
+	return 0.5 * density_ * double(count);
+}
+
 bool Engine::surroundingsSeen(const int3 & tile)
 {
 	// A guard hidden in the fog is not priced; a job is only taken once the
@@ -516,7 +576,7 @@ bool Engine::scoreOne(const CGHeroInstance * hero, const CPathsInfo * paths, con
 			for(const auto & slot : armed->Slots())
 				if(slot.second && slot.second->getCreature())
 					xp += double(slot.second->getCount()) * double(slot.second->getCreature()->getMaxHealth());
-			reward = xpWorth(hero, xp) + host_.pocketBehind(t.tile, hero);
+			reward = xpWorth(hero, xp) + host_.pocketBehind(t.tile, hero) + gateValue(paths, t.tile);
 			if(reward <= 0.0)
 				return false;
 			if(!priceFight(armed))
@@ -656,6 +716,7 @@ std::vector<Option> Engine::scoreOptions(const std::vector<Target> & targets)
 			o << " " << (t.kind == Target::Kind::EnemyTown ? "TOWN " : "") << t.name << "(" << fmt0(double(armed->getArmyStrength())) << ")"
 			  << (e.win ? " win " : " lose ") << fmt2(e.kept) << " xp " << fmt0(xp)
 			  << " r " << fmt0(xpWorth(main, xp) + host_.pocketBehind(t.tile, main))
+			  << " gate " << fmt0(t.kind == Target::Kind::Monster ? gateValue(shared.get(), t.tile) : 0.0)
 			  << " t" << int(node->turns) << ";";
 			++n;
 		}

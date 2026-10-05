@@ -112,6 +112,8 @@ private:
 	std::map<std::pair<int32_t, int3>, int> visited_; // hero/tile visits made, by day
 	int movesToday_ = 0;
 	std::set<int> monsterLogDay_;
+	std::vector<std::vector<uint8_t>> visLevels_;   // tiles seen this pass, per level
+	double density_ = 10.0;                          // army value per unseen tile, this pass
 
 	// Stages of one pass.
 	void hireToCap();
@@ -130,6 +132,7 @@ private:
 	double xpWorth(const CGHeroInstance * hero, double xp);
 	double xpScale(const CGHeroInstance * hero) const;
 	bool surroundingsSeen(const int3 & tile);
+	double gateValue(const CPathsInfo * paths, const int3 & guard);
 	bool dangerousFor(const CGHeroInstance * hero, const int3 & tile,
 		const std::vector<FoeInfo> & foes) const;
 	static double armyOf(const CGHeroInstance * hero);
