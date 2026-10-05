@@ -15,6 +15,7 @@
 #include "StdInc.h"
 #include "callback/CAdventureAI.h"
 #include "eval/CombatEvaluator.h"
+#include "engine/EngineHost.h"
 
 struct HeroMoveDetails;
 
@@ -26,6 +27,7 @@ class HandleRegistry;
 class UtilityEvaluator;
 class DecisionLog;
 struct DifficultyProfile;
+namespace v2 { class Engine; }
 }
 
 VCMI_LIB_NAMESPACE_BEGIN
@@ -44,11 +46,36 @@ VCMI_LIB_NAMESPACE_END
 #include <condition_variable>
 #include <thread>
 
-class OmniAI : public CAdventureAI
+class OmniAI : public CAdventureAI, public omniai::v2::IEngineHost
 {
 public:
 	OmniAI();
 	~OmniAI() override;
+
+	// omniai::v2::IEngineHost: what the v2 engine may ask of this shell
+	// (engine/EngineHost.h). Implemented in OmniAI.cpp beside the legacy
+	// helpers each one forwards to.
+	CCallback & game() override;
+	PlayerColor me() const override;
+	void logLine(const std::string & text) override;
+	void logDetail(const std::string & text) override;
+	std::shared_ptr<const CPathsInfo> paths(const CGHeroInstance * hero) override;
+	std::vector<int3> routeSteps(const CPathsInfo * paths, const CGHeroInstance * hero,
+		const int3 & target) override;
+	bool move(const CGHeroInstance * hero, const std::vector<int3> & steps) override;
+	omniai::v2::FightEstimate estimate(const CGHeroInstance * hero, const CArmedInstance * target) override;
+	const CArmedInstance * guardAt(const int3 & tile, const CGHeroInstance * hero) override;
+	const CArmedInstance * guardOnStep(const int3 & tile, const CGHeroInstance * hero) override;
+	double worth(const CGObjectInstance * obj, const CGHeroInstance * hero) override;
+	double pocketBehind(const int3 & guardPos, const CGHeroInstance * hero) override;
+	double xpValue(const CGHeroInstance * hero, double xp) override;
+	double horizonDays() override;
+	std::vector<omniai::v2::FoeInfo> foes() override;
+	std::vector<omniai::v2::TownThreat> threatenedTowns() override;
+	void giveArmy(const CGHeroInstance * from, const CGHeroInstance * to) override;
+	void setMainHero(int32_t heroId) override;
+	void townPhase(bool firstOfDay) override;
+	bool hireOne() override;
 
 	// CAdventureAI
 	std::string getBattleAIName() const override;
@@ -119,6 +146,8 @@ private:
 	// One per AI instance. An AI-only game loads this plugin once per side,
 	// so a shared logger would have the two sides overwriting each other.
 	std::unique_ptr<omniai::DecisionLog> decisionLog_;
+	/// The v2 execution engine; null when OMNIAI_ENGINE=1 asks for the legacy one.
+	std::unique_ptr<omniai::v2::Engine> engineV2_;
 	/// Spectator narration: decision-log lines worth reading, queued from
 	/// any thread and sent to the game chat from the turn loop.
 	/// Week-one mine plan (September 25th): our heroes paired with the mines
@@ -227,6 +256,8 @@ private:
 	std::map<int32_t, int> buildScanWeek_;
 	/// Last game-week in which the revealed-map fraction was reported.
 	int lastSeenReportWeek_ = -1;
+	/// OWN lines (M0): last owner seen for every mine, dwelling and town.
+	std::map<int32_t, std::string> ownerSeen_;
 
 	// Fog-edge tiles already walked toward this turn. Same oscillation
 	// guard as targetedThisTurn_, keyed by tile instead of object id.

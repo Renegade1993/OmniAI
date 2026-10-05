@@ -89,6 +89,7 @@ set(omniAI_SRCS
 	main.cpp
 	StdInc.cpp
 	OmniAI.cpp
+	engine/Engine.cpp
 	eval/ShadowDAG.cpp
 	eval/DamageBridge.cpp
 	eval/CombatEvaluator.cpp

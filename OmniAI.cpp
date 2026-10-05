@@ -26,6 +26,7 @@
 #include "eval/UtilityEvaluator.h"
 #include "net/ActionDispatcher.h"
 #include "net/PendingActionQueue.h"
+#include "engine/Engine.h"
 
 #include "callback/CCallback.h"
 #include "vcmi/Environment.h"
@@ -756,6 +757,16 @@ void OmniAI::initGameInterface(std::shared_ptr<Environment> ENV, std::shared_ptr
 	opts.useTeleportWhirlpool = false;
 	pathCache_ = std::make_unique<PathfinderCache>(cb.get(), opts);
 
+	// The v2 execution engine plays the day unless OMNIAI_ENGINE=1 asks for
+	// the legacy one (Megaplan-OmniAI-2026-10-04.md, section 4.8). Both share
+	// this shell: its dawn logging, its dialogs, its town code to begin with.
+	{
+		const char * which = std::getenv("OMNIAI_ENGINE");
+		if(!(which && std::string(which) == "1"))
+			engineV2_ = std::make_unique<omniai::v2::Engine>(*this);
+		decisionLog_->line(std::string("  ENGINE ") + (engineV2_ ? "v2" : "legacy"));
+	}
+
 	// Per-game world state: the enemy-bearing hint and the deferred route
 	// guards belong to this map, not the last one. The world-object records
 	// and the task list built on them are the same - a stale guard position
@@ -1181,6 +1192,13 @@ void OmniAI::runTurn()
 		prevSeenCount_ = seen;
 	}
 
+	// The v2 engine plays the rest of the day (engine/Engine.cpp).
+	if(engineV2_)
+	{
+		engineV2_->makeTurn();
+		return;
+	}
+
 	// Towns build first, before anyone moves. Building does not depend on a
 	// hero being present, and doing it up front means the day's one building
 	// is never lost to a hero wandering off and the turn ending.
@@ -1549,6 +1567,48 @@ void OmniAI::logTruth()
 					to << "-";
 			}
 			decisionLog_->line("   TOWNS d" + std::to_string(day) + to.str());
+		}
+		// OWN (M0, October 4th, log only): every change of owner of a mine, a
+		// dwelling or a town since the last dawn, both sides, so a game shows
+		// who took what and when. The first dawn records the map silently.
+		{
+			std::ostringstream ow;
+			const bool first = ownerSeen_.empty();
+			for(const CGObjectInstance * obj : gs.getMap().getObjects())
+			{
+				if(!obj)
+					continue;
+				std::string kind;
+				if(const auto * mine = dynamic_cast<const CGMine *>(obj))
+					kind = "M" + std::to_string(mine->producedResource.getNum());
+				else if(dynamic_cast<const CGTownInstance *>(obj))
+					kind = "T";
+				else if(dynamic_cast<const CGDwelling *>(obj))
+					kind = "D";
+				else
+					continue;
+				const std::string owner = obj->tempOwner.isValidPlayer() ? obj->tempOwner.toString() : std::string("none");
+				auto it = ownerSeen_.find(obj->id.getNum());
+				if(it == ownerSeen_.end())
+				{
+					ownerSeen_[obj->id.getNum()] = owner;
+					if(!first)
+						continue;
+					if(owner == "none")
+						continue;
+					it = ownerSeen_.find(obj->id.getNum());
+					const int3 p = obj->visitablePos();
+					ow << " " << kind << "@" << p.x << "," << p.y << "," << p.z << ":start>" << owner;
+					continue;
+				}
+				if(it->second == owner)
+					continue;
+				const int3 p = obj->visitablePos();
+				ow << " " << kind << "@" << p.x << "," << p.y << "," << p.z << ":" << it->second << ">" << owner;
+				it->second = owner;
+			}
+			if(!ow.str().empty())
+				decisionLog_->line("   OWN d" + std::to_string(day) + ow.str());
 		}
 		std::ostringstream ho;
 		for(const auto & entry : gs.players)
@@ -12171,4 +12231,171 @@ std::optional<BattleAction> OmniAI::makeSurrenderRetreatDecision(const BattleID 
 	  << battleState.getOurStrength() << " vs enemy " << battleState.getEnemyStrength();
 	decisionLog_->line(o.str());
 	return BattleAction::makeRetreat(battleState.ourSide);
+}
+
+
+// ---------------------------------------------------------------------------
+// omniai::v2::IEngineHost (engine/EngineHost.h): the v2 engine's view of this
+// shell. Each method forwards to the legacy helper that already does the job.
+// ---------------------------------------------------------------------------
+
+CCallback & OmniAI::game()
+{
+	return *cb;
+}
+
+PlayerColor OmniAI::me() const
+{
+	return playerID;
+}
+
+void OmniAI::logLine(const std::string & text)
+{
+	decisionLog_->line(text);
+}
+
+void OmniAI::logDetail(const std::string & text)
+{
+	decisionLog_->detail(text);
+}
+
+std::shared_ptr<const CPathsInfo> OmniAI::paths(const CGHeroInstance * hero)
+{
+	if(!pathCache_ || !hero)
+		return nullptr;
+	return pathCache_->getPathsInfo(hero);
+}
+
+std::vector<int3> OmniAI::routeSteps(const CPathsInfo * p, const CGHeroInstance * hero, const int3 & target)
+{
+	return stepsToward(const_cast<CPathsInfo *>(p), hero, target);
+}
+
+bool OmniAI::move(const CGHeroInstance * hero, const std::vector<int3> & steps)
+{
+	if(!cb || !hero || !dispatcher_ || steps.empty())
+		return false;
+	// A garrisoned hero steps out first (see walk()).
+	for(const CGTownInstance * town : cb->getTownsInfo())
+		if(town && town->tempOwner == playerID && town->getGarrisonHero() == hero)
+		{
+			cb->swapGarrisonHero(town);
+			break;
+		}
+	// An open query blocks every pack but its reply (see walk()).
+	for(int i = 0; i < 60 && openQueries_.load() > 0; ++i)
+		std::this_thread::sleep_for(std::chrono::milliseconds(50));
+	++movesDispatched_;
+	dispatcher_->moveHero(hero, steps, false);
+	return true;
+}
+
+omniai::v2::FightEstimate OmniAI::estimate(const CGHeroInstance * hero, const CArmedInstance * target)
+{
+	const omniai::CombatVerdict v = combatVerdict(hero, target);
+	omniai::v2::FightEstimate e;
+	e.win = v.win;
+	e.kept = v.win ? v.margin : 0.0;
+	return e;
+}
+
+const CArmedInstance * OmniAI::guardAt(const int3 & tile, const CGHeroInstance * hero)
+{
+	return strongestHostileAt(tile, hero);
+}
+
+const CArmedInstance * OmniAI::guardOnStep(const int3 & tile, const CGHeroInstance * hero)
+{
+	return strongestHostileOnStep(tile, hero);
+}
+
+double OmniAI::worth(const CGObjectInstance * obj, const CGHeroInstance * hero)
+{
+	return worthOf(obj, hero);
+}
+
+double OmniAI::pocketBehind(const int3 & guardPos, const CGHeroInstance * hero)
+{
+	return pocketValueBehind(guardPos, hero);
+}
+
+double OmniAI::xpValue(const CGHeroInstance * hero, double xp)
+{
+	return xpWorth(hero, xp);
+}
+
+double OmniAI::horizonDays()
+{
+	return valueHorizonDays();
+}
+
+std::vector<omniai::v2::FoeInfo> OmniAI::foes()
+{
+	std::vector<omniai::v2::FoeInfo> out;
+	if(!cb)
+		return out;
+	const int today = cb->getDate(Date::DAY);
+	for(const auto & kv : foeSeen_)
+	{
+		omniai::v2::FoeInfo f;
+		f.id = kv.first;
+		f.pos = kv.second.pos;
+		f.strength = kv.second.str;
+		f.reach = kv.second.reach;
+		f.ageDays = today - kv.second.day;
+		out.push_back(f);
+	}
+	return out;
+}
+
+std::vector<omniai::v2::TownThreat> OmniAI::threatenedTowns()
+{
+	std::vector<omniai::v2::TownThreat> out;
+	for(const auto & kv : threatenedTowns_)
+	{
+		omniai::v2::TownThreat t;
+		t.townId = kv.first;
+		t.threat = kv.second;
+		out.push_back(t);
+	}
+	return out;
+}
+
+void OmniAI::giveArmy(const CGHeroInstance * from, const CGHeroInstance * to)
+{
+	handOver(from, to);
+}
+
+void OmniAI::setMainHero(int32_t heroId)
+{
+	// The legacy town code (recruitInAllTowns, heroVisitsTown, handOver)
+	// gives the pool and the last stack to fieldHeroId_.
+	fieldHeroId_ = heroId;
+}
+
+void OmniAI::townPhase(bool firstOfDay)
+{
+	if(!cb)
+		return;
+	if(firstOfDay)
+	{
+		updateResourceScarcity();
+		assessThreats();
+		assessPosture();
+		if(contactSoon() && cb->getDate(Date::DAY) <= 3)
+			recruitInAllTowns();
+		tradeForBlockedBuilding();
+		buildInAllTowns();
+		tradeForWhatIsMissing();
+		recruitInAllTowns();
+		return;
+	}
+	assessThreats();
+	assessPosture();
+	recruitInAllTowns();
+}
+
+bool OmniAI::hireOne()
+{
+	return hireHeroIfNone();
 }
