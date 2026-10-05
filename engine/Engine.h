@@ -34,7 +34,7 @@ struct Settings
 	double lossBudget = 0.35;
 	/// Score multiplier for a hero's previous target, so near-equal jobs do
 	/// not swap back and forth between passes.
-	double momentum = 2.0;
+	double momentum = 1.4;
 	/// Days beyond which a job is not considered.
 	double horizonDays = 14.0;
 	/// Share of a support hero's army that counts as gained when it reaches
