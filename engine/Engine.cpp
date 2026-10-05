@@ -582,7 +582,7 @@ bool Engine::scoreOne(const CGHeroInstance * hero, const CPathsInfo * paths, con
 	const double net = reward - loss;
 	if(net <= 0.0)
 		return false;
-	double score = net / (days + 0.25);
+	double score = std::pow(net, s_.valueExponent) / (days + 0.25);
 	auto last = lastTile_.find(hero->id.getNum());
 	if(last != lastTile_.end() && last->second == t.tile)
 		score *= s_.momentum;

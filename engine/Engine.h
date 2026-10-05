@@ -58,6 +58,10 @@ struct Settings
 	/// Caps on how much a short resource multiplies a mine's or pile's worth.
 	double needCap = 4.0;
 	double goldNeedCap = 3.0;
+	/// Scores are net value to this power, per day of the hero's time. Below
+	/// 1 it favours many near jobs over one far, valuable one (Nullkiller
+	/// takes the nearest job that pays at all); 1 ranks by value per day.
+	double valueExponent = 0.6;
 	/// Passes per day, a bound.
 	int maxPasses = 40;
 	/// Heroes kept: the first `baseHeroes`, one more per town above the
