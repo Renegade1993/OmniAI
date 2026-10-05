@@ -373,7 +373,7 @@ void Engine::proposeExplore(std::vector<Target> & out, double knownValue)
 	// value still lying on it fell as heroes collected it, so exploring lost
 	// to the leftovers nearby: by day 28 of the M1 gate (V2M1T) our heroes had
 	// seen 0.78 of the tiles Nullkiller's had, by day 56 0.71.
-	const double density = std::clamp(0.5 * discoveredSum_ / std::max(1, visible), 5.0, 150.0);
+	const double density = std::clamp(0.5 * discoveredSum_ / std::max(1, visible), 5.0, 400.0);
 	density_ = density;
 	const int R = 5;
 	for(int z = 0; z < size.z; ++z)
