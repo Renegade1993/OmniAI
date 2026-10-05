@@ -1628,8 +1628,11 @@ void OmniAI::logTruth()
 				if(!h)
 					continue;
 				const int3 hp = h->visitablePos();
+				// Then the land movement allowance and what is left of it now:
+				// the side that moved last shows its unspent movement.
 				ho << " " << h->id.getNum() << ":" << h->getNameTranslated() << "@" << hp.x << ","
-				   << hp.y << "," << hp.z << ":" << uint64_t(h->getArmyStrength()) << ":" << h->level;
+				   << hp.y << "," << hp.z << ":" << uint64_t(h->getArmyStrength()) << ":" << h->level
+				   << ":" << h->movementPointsLimit(true) << ":" << h->movementPointsRemaining();
 			}
 			ho << " |";
 		}
