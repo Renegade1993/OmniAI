@@ -530,6 +530,37 @@ double Engine::visitValue(const CGObjectInstance * obj, const CGHeroInstance * h
 	return value;
 }
 
+double Engine::onwardValue(const CGHeroInstance * hero, const int3 & tile) const
+{
+	// What lies just past a visit, seen from the hero: visits within the
+	// radius of it and further from the hero than it is, nearer ones counting
+	// more. Days on several visits covered 7.3 tiles to single-target days'
+	// 12.5 to 16 (V2M1Y, AC, AD): heroes hopped about a cluster, nearest first.
+	if(!hero || s_.onwardShare <= 0.0)
+		return 0.0;
+	const int3 from = hero->visitablePos();
+	const int reach = chebyshev(from, tile);
+	const int R = s_.onwardRadius;
+	double sum = 0.0;
+	for(int cy = (tile.y - R) / 8 - 1; cy <= (tile.y + R) / 8; ++cy)
+		for(int cx = (tile.x - R) / 8 - 1; cx <= (tile.x + R) / 8; ++cx)
+		{
+			const auto cell = onward_.find({cx, cy, tile.z});
+			if(cell == onward_.end())
+				continue;
+			for(const auto & [p, v] : cell->second)
+			{
+				if(p == tile)
+					continue;
+				const int d = chebyshev(tile, p);
+				if(d > R || chebyshev(from, p) <= reach)
+					continue;
+				sum += v * (1.0 - double(d) / double(R + 1));
+			}
+		}
+	return s_.onwardShare * sum;
+}
+
 double Engine::gateValue(const CPathsInfo * paths, const int3 & guard)
 {
 	// A guard that stands in a passage is worth the ground it shuts off. From
@@ -672,6 +703,7 @@ bool Engine::scoreOne(const CGHeroInstance * hero, const CPathsInfo * paths, con
 				return false;
 			if(!priceFight(host_.guardAt(t.tile, hero)))
 				return false;
+			reward += onwardValue(hero, t.tile);
 			break;
 		}
 		case Target::Kind::Monster:
@@ -786,6 +818,17 @@ std::vector<Option> Engine::scoreOptions(const std::vector<Target> & targets)
 	for(const CGTownInstance * t : cb.getTownsInfo())
 		if(t)
 			ourTowns.insert(t->visitablePos());
+
+	// The visits on offer, by 8x8 cell, each at its worth when first seen, for
+	// onwardValue().
+	onward_.clear();
+	for(const Target & t : targets)
+		if(t.kind == Target::Kind::Visit)
+		{
+			const auto d = discovered_.find(t.id.getNum());
+			if(d != discovered_.end() && d->second > 0.0)
+				onward_[{t.tile.x / 8, t.tile.y / 8, t.tile.z}].push_back({t.tile, d->second});
+		}
 
 	std::vector<Option> options;
 	// The main hero standing in a threatened town stays there: its army, the

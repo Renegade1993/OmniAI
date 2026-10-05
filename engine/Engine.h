@@ -21,6 +21,7 @@
 #include <map>
 #include <set>
 #include <string>
+#include <tuple>
 #include <vector>
 
 namespace omniai::v2
@@ -62,6 +63,11 @@ struct Settings
 	/// 1 it favours many near jobs over one far, valuable one (Nullkiller
 	/// takes the nearest job that pays at all); 1 ranks by value per day.
 	double valueExponent = 0.6;
+	/// Share of the value lying just beyond a visit (within `onwardRadius`
+	/// tiles of it and further from the hero) added to that visit's worth, so
+	/// a hero sweeps a cluster in one direction instead of hopping about it.
+	double onwardShare = 0.3;
+	int onwardRadius = 6;
 	/// Passes per day, a bound.
 	int maxPasses = 40;
 	/// Heroes kept: the first `baseHeroes`, one more per town above the
@@ -122,6 +128,7 @@ private:
 	std::set<int> monsterLogDay_;
 	std::vector<std::vector<uint8_t>> visLevels_;   // tiles seen this pass, per level
 	double density_ = 10.0;                          // army value per unseen tile, this pass
+	std::map<std::tuple<int, int, int>, std::vector<std::pair<int3, double>>> onward_;   // visits by 8x8 cell, this pass
 
 	// Stages of one pass.
 	void hireToCap();
@@ -141,6 +148,7 @@ private:
 	double xpScale(const CGHeroInstance * hero) const;
 	bool surroundingsSeen(const int3 & tile);
 	double gateValue(const CPathsInfo * paths, const int3 & guard);
+	double onwardValue(const CGHeroInstance * hero, const int3 & tile) const;
 	bool dangerousFor(const CGHeroInstance * hero, const int3 & tile,
 		const std::vector<FoeInfo> & foes) const;
 	static double armyOf(const CGHeroInstance * hero);
