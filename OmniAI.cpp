@@ -10496,6 +10496,7 @@ void OmniAI::battleStart(const BattleID & battleID, const CCreatureSet * army1,
 	const CCreatureSet * army2, int3 tile, const CGHeroInstance * hero1,
 	const CGHeroInstance * hero2, BattleSide side, bool replayAllowed)
 {
+	battlesOpen_.fetch_add(1);
 	// Capture the predicted strength ratio before delegating; battleEnd
 	// pairs it with the outcome for the learning threshold.
 	battlesActive_.fetch_add(1);
@@ -10632,6 +10633,8 @@ void OmniAI::battleStart(const BattleID & battleID, const CCreatureSet * army1,
 
 void OmniAI::battleEnd(const BattleID & battleID, const BattleResult * br, QueryID queryID)
 {
+	if(battlesOpen_.load() > 0)
+		battlesOpen_.fetch_sub(1);
 	const auto it = pendingBattleRatio_.find(battleID);
 	if(it != pendingBattleRatio_.end())
 	{
@@ -12292,8 +12295,13 @@ bool OmniAI::move(const CGHeroInstance * hero, const std::vector<int3> & steps)
 			cb->swapGarrisonHero(town);
 			break;
 		}
-	// An open query blocks every pack but its reply (see walk()).
-	for(int i = 0; i < 60 && openQueries_.load() > 0; ++i)
+	// An open query blocks every pack but its reply (see walk()), and so does
+	// a battle or a movement still being resolved: the server answers a move
+	// sent then with nothing (V2M1P: every hero's walk refused at once, with
+	// no dialog open, while another of ours was fighting). Wait for them, up
+	// to 20 seconds.
+	for(int i = 0; i < 400 && (openQueries_.load() > 0 || battlesOpen_.load() > 0
+		|| blockade_[0].load() || blockade_[1].load()); ++i)
 		std::this_thread::sleep_for(std::chrono::milliseconds(50));
 	++movesDispatched_;
 	dispatcher_->moveHero(hero, steps, false);
@@ -12302,7 +12310,14 @@ bool OmniAI::move(const CGHeroInstance * hero, const std::vector<int3> & steps)
 
 int OmniAI::openQueryCount() const
 {
-	return openQueries_.load();
+	return openQueries_.load() + 100 * battlesOpen_.load()
+		+ 1000 * (blockade_[0].load() ? 1 : 0) + 10000 * (blockade_[1].load() ? 1 : 0);
+}
+
+void OmniAI::playerBlocked(int reason, bool start)
+{
+	if(reason >= 0 && reason < 2)
+		blockade_[reason].store(start);
 }
 
 omniai::v2::FightEstimate OmniAI::estimate(const CGHeroInstance * hero, const CArmedInstance * target)

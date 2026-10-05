@@ -126,6 +126,7 @@ public:
 	void requestSent(const CPackForServer *pack, int requestID) override;
 	void requestRealized(PackageApplied *pa) override;
 	void playerStartsTurn(PlayerColor player) override;
+	void playerBlocked(int reason, bool start) override;
 	void playerEndsTurn(PlayerColor player) override;
 
 	// Battle wrappers: capture predicted ratio + outcome for the learning
@@ -261,6 +262,10 @@ private:
 	int lastSeenReportWeek_ = -1;
 	/// OWN lines (M0): last owner seen for every mine, dwelling and town.
 	std::map<int32_t, std::string> ownerSeen_;
+	/// Server blockades on this player (0 upcoming battle, 1 ongoing movement),
+	/// and battles in progress: a move sent during either is refused.
+	std::atomic<bool> blockade_[2] = {false, false};
+	std::atomic<int> battlesOpen_{0};
 
 	// Fog-edge tiles already walked toward this turn. Same oscillation
 	// guard as targetedThisTurn_, keyed by tile instead of object id.
