@@ -63,6 +63,7 @@ public:
 	std::vector<int3> routeSteps(const CPathsInfo * paths, const CGHeroInstance * hero,
 		const int3 & target) override;
 	bool move(const CGHeroInstance * hero, const std::vector<int3> & steps) override;
+	int openQueryCount() const override;
 	omniai::v2::FightEstimate estimate(const CGHeroInstance * hero, const CArmedInstance * target) override;
 	const CArmedInstance * guardAt(const int3 & tile, const CGHeroInstance * hero) override;
 	const CArmedInstance * guardOnStep(const int3 & tile, const CGHeroInstance * hero) override;

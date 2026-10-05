@@ -113,6 +113,7 @@ private:
 	std::map<int32_t, int3> lastTile_;              // hero -> tile of its last job (momentum)
 	std::set<std::pair<int32_t, int3>> blocked_;     // hero/tile jobs that failed today
 	std::set<int32_t> doneToday_;                    // heroes that cannot act again today
+	std::map<int32_t, int> noMoves_;                 // walks sent today that moved nothing, per hero
 	std::map<std::pair<int32_t, int3>, int> visited_; // hero/tile visits made, by day
 	int movesToday_ = 0;
 	std::set<int> monsterLogDay_;

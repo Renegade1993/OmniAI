@@ -83,6 +83,7 @@ void Engine::makeTurn()
 	day_ = cb.getDate(Date::DAY);
 	blocked_.clear();
 	doneToday_.clear();
+	noMoves_.clear();
 	movesToday_ = 0;
 
 	hireToCap();
@@ -1004,7 +1005,16 @@ bool Engine::execute(const std::vector<Option> & plan, const std::vector<Target>
 		const bool moved = hero->visitablePos() != before || hero->movementPointsRemaining() < mpBefore;
 		if(!moved)
 		{
+			// A walk the server did not carry out. Logged with what may explain
+			// it; after three in a day the hero is left alone until tomorrow
+			// (V2M1L map 03: one hero sent 40 walks a day for a week, none taken).
 			blocked_.insert({o.hero, t.tile});
+			const int n = ++noMoves_[o.hero];
+			host_.logLine("   V2 NOMOVE " + hero->getNameTranslated() + " at " + before.toString()
+				+ " mp " + std::to_string(mpBefore) + " first step " + hero->convertToVisitablePos(steps.front()).toString()
+				+ " queries " + std::to_string(host_.openQueryCount()) + " (" + std::to_string(n) + " today)");
+			if(n >= 3)
+				doneToday_.insert(o.hero);
 			continue;
 		}
 		anyMoved = true;

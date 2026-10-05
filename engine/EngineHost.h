@@ -75,6 +75,9 @@ public:
 		const int3 & target) = 0;
 	/// Moves the hero along `steps` (anchors). Steps out of a garrison first.
 	virtual bool move(const CGHeroInstance * hero, const std::vector<int3> & steps) = 0;
+	/// Server queries (dialogs) still waiting for our answer; a move sent while
+	/// one is open is refused.
+	virtual int openQueryCount() const = 0;
 
 	// Fights.
 	virtual FightEstimate estimate(const CGHeroInstance * hero, const CArmedInstance * target) = 0;

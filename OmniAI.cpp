@@ -12300,6 +12300,11 @@ bool OmniAI::move(const CGHeroInstance * hero, const std::vector<int3> & steps)
 	return true;
 }
 
+int OmniAI::openQueryCount() const
+{
+	return openQueries_.load();
+}
+
 omniai::v2::FightEstimate OmniAI::estimate(const CGHeroInstance * hero, const CArmedInstance * target)
 {
 	const omniai::CombatVerdict v = combatVerdict(hero, target);
