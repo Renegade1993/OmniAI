@@ -640,7 +640,7 @@ std::vector<Option> Engine::scoreOptions(const std::vector<Target> & targets)
 		int n = 0;
 		for(const Target & t : targets)
 		{
-			if(t.kind != Target::Kind::Monster || !shared || n >= 8)
+			if((t.kind != Target::Kind::Monster && t.kind != Target::Kind::EnemyTown) || !shared || n >= 10)
 				continue;
 			const CGPathNode * node = shared->getPathInfo(t.tile);
 			if(!node || !node->reachable() || node->turns > 2)
@@ -653,7 +653,7 @@ std::vector<Option> Engine::scoreOptions(const std::vector<Target> & targets)
 			for(const auto & slot : armed->Slots())
 				if(slot.second && slot.second->getCreature())
 					xp += double(slot.second->getCount()) * double(slot.second->getCreature()->getMaxHealth());
-			o << " " << t.name << "(" << fmt0(double(armed->getArmyStrength())) << ")"
+			o << " " << (t.kind == Target::Kind::EnemyTown ? "TOWN " : "") << t.name << "(" << fmt0(double(armed->getArmyStrength())) << ")"
 			  << (e.win ? " win " : " lose ") << fmt2(e.kept) << " xp " << fmt0(xp)
 			  << " r " << fmt0(xpWorth(main, xp) + host_.pocketBehind(t.tile, main))
 			  << " t" << int(node->turns) << ";";
