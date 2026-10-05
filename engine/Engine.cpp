@@ -767,8 +767,14 @@ bool Engine::scoreOne(const CGHeroInstance * hero, const CPathsInfo * paths, con
 	if(net <= 0.0)
 		return false;
 	double score = std::pow(net, s_.valueExponent) / (days + 0.25);
+	// The job the hero is walking to, or one within three tiles of it (fog
+	// moves an explore target as it clears, a main hero moves a gather
+	// target), keeps a lead: 52% of jobs more than a day away were dropped
+	// for another (V2M1X), and the heroes covered 0.53 tiles per 100 movement
+	// points to Nullkiller's 0.60.
 	auto last = lastTile_.find(hero->id.getNum());
-	if(last != lastTile_.end() && last->second == t.tile)
+	if(last != lastTile_.end() && last->second.z == t.tile.z && last->second != hero->visitablePos()
+		&& chebyshev(last->second, t.tile) <= 3)
 		score *= s_.momentum;
 	out.hero = hero->id.getNum();
 	out.reward = reward;
