@@ -102,17 +102,27 @@ void Engine::makeTurn()
 	}
 
 	int heroes = 0, idle = 0;
+	double mpLeft = 0.0, mpAll = 0.0;
+	std::ostringstream left;
 	for(const CGHeroInstance * h : cb.getHeroesInfo())
 	{
 		if(!h)
 			continue;
 		++heroes;
+		const double lim = double(std::max(1, h->movementPointsLimit(true)));
+		mpLeft += std::min(lim, double(h->movementPointsRemaining()));
+		mpAll += lim;
 		if(h->movementPointsRemaining() >= h->movementPointsLimit(true))
 			++idle;
+		if(h->movementPointsRemaining() > 0.25 * lim)
+			left << " " << h->getNameTranslated() << ":" << fmt0(100.0 * h->movementPointsRemaining() / lim) << "%";
 	}
+	// Movement left unspent at the end of the day, the share of every hero's
+	// allowance, and which heroes stopped with more than a quarter left.
 	host_.logLine("   V2 d" + std::to_string(day_) + " passes=" + std::to_string(passes)
 		+ " moves=" + std::to_string(movesToday_) + " heroes=" + std::to_string(heroes)
-		+ " unmoved=" + std::to_string(idle) + " main=" + std::to_string(mainHero_));
+		+ " unmoved=" + std::to_string(idle) + " mpLeft=" + fmt0(100.0 * mpLeft / std::max(1.0, mpAll)) + "%"
+		+ " main=" + std::to_string(mainHero_) + (left.str().empty() ? "" : " |" + left.str()));
 }
 
 void Engine::hireToCap()
@@ -604,6 +614,20 @@ std::vector<Option> Engine::scoreOptions(const std::vector<Target> & targets)
 			ourTowns.insert(t->visitablePos());
 
 	std::vector<Option> options;
+	// The main hero standing in a threatened town stays there: its army, the
+	// garrison it collected on arrival and the walls fight together. Walking
+	// out to the next prize is how map 05's only town fell on day 28 (V2M1D).
+	const std::vector<TownThreat> threats = host_.threatenedTowns();
+	if(mainHero_ >= 0 && !doneToday_.count(mainHero_))
+		if(const CGHeroInstance * main = cb.getHero(ObjectInstanceID(mainHero_)))
+			for(const TownThreat & threat : threats)
+				if(const auto * town = dynamic_cast<const CGTownInstance *>(cb.getObj(ObjectInstanceID(threat.townId), false)))
+					if(town->visitablePos() == main->visitablePos())
+					{
+						doneToday_.insert(mainHero_);
+						host_.logLine("   V2 HOLD " + main->getNameTranslated() + " stays in " + town->getNameTranslated()
+							+ " (threat " + fmt0(threat.threat) + ")");
+					}
 	// Once a day, the main hero's view of the monsters in reach: what each
 	// fight is predicted to cost and to pay, so a log shows why it fought or
 	// did not.
@@ -662,8 +686,8 @@ std::vector<Option> Engine::scoreOptions(const std::vector<Target> & targets)
 
 	// A town under threat calls the main hero home, whatever else is on offer.
 	const CGHeroInstance * main = mainHero_ >= 0 ? cb.getHero(ObjectInstanceID(mainHero_)) : nullptr;
-	if(main && main->movementPointsRemaining() > 0)
-		for(const TownThreat & threat : host_.threatenedTowns())
+	if(main && main->movementPointsRemaining() > 0 && !doneToday_.count(mainHero_))
+		for(const TownThreat & threat : threats)
 		{
 			const auto * town = dynamic_cast<const CGTownInstance *>(cb.getObj(ObjectInstanceID(threat.townId), false));
 			if(!town)
