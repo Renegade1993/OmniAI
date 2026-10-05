@@ -46,6 +46,14 @@
 #include "mapObjects/CGDwelling.h"
 #include "mapObjects/CGMarket.h"
 #include "mapObjects/MiscObjects.h"
+#include "mapObjects/CGResource.h"
+#include "rewardable/Interface.h"
+#include "rewardable/Configuration.h"
+#include "rewardable/Reward.h"
+#include "entities/hero/CHeroHandler.h"
+#include "entities/artifact/CArtifact.h"
+#include "GameLibrary.h"
+#include "mapObjects/CGResource.h"
 #include "mapObjects/CQuest.h"
 #include "mapObjects/IMarket.h"
 #include "entities/building/CBuilding.h"
@@ -55,6 +63,7 @@
 #include "entities/building/TownFortifications.h"
 #include "entities/faction/CTown.h"
 #include "mapping/CMapHeader.h"
+#include "mapping/CMap.h"
 #include "mapping/TerrainTile.h"
 #include "networkPacks/PacksForClient.h"
 #include "networkPacks/PacksForClientBattle.h"
@@ -1445,6 +1454,120 @@ void OmniAI::logTruth()
 	// the accessor. Read here and logged, never handed to a decision.
 	const CGameState & gs = static_cast<const IGameInfoCallback &>(*cb).gameState();
 	const int day = cb->getDate(Date::DAY);
+	// LOOTDIAG, September 27th (log only): every one-shot pickup still on the
+	// map and every hero, both sides, at dawn. Diffing two dawns says what was
+	// taken, and the nearest hero says by whom.
+	{
+		std::ostringstream lo;
+		int n = 0;
+		for(const CGObjectInstance * obj : gs.getMap().getObjects())
+		{
+			if(!obj)
+				continue;
+			std::string code;
+			switch(obj->ID.toEnum())
+			{
+				case Obj::TREASURE_CHEST: code = "T"; break;
+				case Obj::CAMPFIRE: code = "C"; break;
+				case Obj::ARTIFACT: code = "A"; break;
+				case Obj::SPELL_SCROLL: code = "S"; break;
+				case Obj::PANDORAS_BOX: code = "P"; break;
+				case Obj::SEA_CHEST: case Obj::FLOTSAM: code = "W"; break;
+				case Obj::RESOURCE:
+				{
+					const auto * pile = dynamic_cast<const CGResource *>(obj);
+					code = "R" + std::to_string(pile ? pile->resourceID().getNum() : -1)
+						+ ":" + std::to_string(pile ? pile->getAmount() : 0);
+					break;
+				}
+				default: break;
+			}
+			if(code.empty())
+				continue;
+			const int3 p = obj->visitablePos();
+			lo << " " << code << "@" << p.x << "," << p.y << "," << p.z;
+			++n;
+		}
+		decisionLog_->line("   LOOT d" + std::to_string(day) + " n=" + std::to_string(n) + lo.str());
+		// SEENDIAG (log only): tiles and pickups each player can see at dawn.
+		{
+			const int3 msize = cb->getMapSize();
+			std::ostringstream so;
+			for(const auto & entry : gs.players)
+			{
+				if(!entry.first.isValidPlayer() || entry.second.status != EPlayerStatus::INGAME)
+					continue;
+				int tiles = 0, lootSeen = 0;
+				for(int z = 0; z < msize.z; ++z)
+					for(int y = 0; y < msize.y; ++y)
+						for(int x = 0; x < msize.x; ++x)
+							if(gs.isVisibleFor(int3(x, y, z), entry.first))
+								++tiles;
+				for(const CGObjectInstance * obj : gs.getMap().getObjects())
+				{
+					if(!obj)
+						continue;
+					switch(obj->ID.toEnum())
+					{
+						case Obj::TREASURE_CHEST: case Obj::CAMPFIRE: case Obj::ARTIFACT: case Obj::SPELL_SCROLL:
+						case Obj::PANDORAS_BOX: case Obj::SEA_CHEST: case Obj::FLOTSAM: case Obj::RESOURCE:
+							break;
+						default:
+							continue;
+					}
+					if(gs.isVisibleFor(obj->visitablePos(), entry.first))
+						++lootSeen;
+				}
+				so << " " << entry.first.toString() << ":" << tiles << ":" << lootSeen;
+			}
+			decisionLog_->line("   SEEN d" + std::to_string(day) + so.str());
+		}
+		// TOWNSEEN (log only): every town, its owner and garrison, and who sees it.
+		{
+			std::ostringstream to;
+			for(const CGObjectInstance * obj : gs.getMap().getObjects())
+			{
+				const auto * town = dynamic_cast<const CGTownInstance *>(obj);
+				if(!town)
+					continue;
+				const int3 tp = town->visitablePos();
+				to << " " << tp.x << "," << tp.y << "," << tp.z << ":"
+				   << (town->tempOwner.isValidPlayer() ? town->tempOwner.toString() : std::string("neutral"))
+				   << ":" << town->getArmyStrength() << ":";
+				bool any = false;
+				for(const auto & entry : gs.players)
+				{
+					if(!entry.first.isValidPlayer() || entry.second.status != EPlayerStatus::INGAME)
+						continue;
+					if(gs.isVisibleFor(tp, entry.first))
+					{
+						to << entry.first.toString().substr(0, 1);
+						any = true;
+					}
+				}
+				if(!any)
+					to << "-";
+			}
+			decisionLog_->line("   TOWNS d" + std::to_string(day) + to.str());
+		}
+		std::ostringstream ho;
+		for(const auto & entry : gs.players)
+		{
+			if(!entry.first.isValidPlayer() || entry.second.status != EPlayerStatus::INGAME)
+				continue;
+			ho << " " << entry.first.toString();
+			for(const CGHeroInstance * h : entry.second.getHeroes())
+			{
+				if(!h)
+					continue;
+				const int3 hp = h->visitablePos();
+				ho << " " << h->id.getNum() << ":" << h->getNameTranslated() << "@" << hp.x << ","
+				   << hp.y << "," << hp.z << ":" << uint64_t(h->getArmyStrength()) << ":" << h->level;
+			}
+			ho << " |";
+		}
+		decisionLog_->line("   HEROES d" + std::to_string(day) + ho.str());
+	}
 	for(const auto & entry : gs.players)
 	{
 		const PlayerColor color = entry.first;
@@ -3703,6 +3826,7 @@ void OmniAI::refreshTasks()
 				bestPrize.str = uint64_t(guard->getArmyStrength());
 				bestPrize.ready = true;
 				bestPrize.heroId = fieldHeroId_;
+				bestPrize.perDay = (worthOf(obj, field) - cost) / double(1 + route.nodes.front().turns);   // S4
 				std::ostringstream o;
 				o << "   PRIZE " << obj->getObjectName() << " at " << obj->visitablePos().toString()
 				  << ": worth " << int(worth) << ", the fight costs " << int(cost)
@@ -3714,6 +3838,147 @@ void OmniAI::refreshTasks()
 		}
 		deferGuard(guard);
 	}
+	// S3, September 27th (PREREG-S3.md): a guard is also worth what it seals.
+	// On MapGen's maps the neutral towns sit behind zone guards, and nothing
+	// priced a guard by the town past it (R8b skipped towns 142 times as "no
+	// route" on the 21 maps). Every town, mine or dwelling not ours that the
+	// field hero cannot reach today is credited to the nearest known guard
+	// within the radius; a guard it beats whose fight costs less army than
+	// that is a prize, in guardedPrizeWorth's units.
+	if(field && pathCache_)
+	{
+		auto sealShared = pathCache_->getPathsInfo(field);
+		CPathsInfo * sealPaths = sealShared ? const_cast<CPathsInfo *>(sealShared.get()) : nullptr;
+		if(sealPaths)
+		{
+			const double horizon = valueHorizonDays();
+			const int z = field->visitablePos().z;
+			// S3b: the engine's through-guards pass (ignoreGuards), the same call
+			// PathfinderCache makes, with the movement paths' teleport options.
+			auto through = std::make_shared<CPathsInfo>(cb->getMapSize(), field);
+			{
+				auto cfg = std::make_shared<SingleHeroPathfinderConfig>(*through, *cb, field);
+				PathfinderOptions o(*cb);
+				o.useTeleportTwoWay = true;
+				o.useTeleportOneWay = true;
+				o.useTeleportOneWayRandom = false;
+				o.useTeleportWhirlpool = false;
+				o.ignoreGuards = true;
+				o.turnLimit = 5;
+				cfg->options = o;
+				cb->calculatePaths(cfg);
+			}
+			std::map<int32_t, double> sealed;
+			std::map<int32_t, std::string> sealedWhat;
+			std::map<int32_t, double> sealedS4;   // S4: the same, in worthOf's units
+			int scanShut = 0, scanRouted = 0;
+			for(const auto & kv : worldObjs_)
+			{
+				const WorldObj & w = kv.second;
+				if(w.owner == playerID.getNum() || w.pos.z != z)
+					continue;
+				if(w.kind != WorldObj::Kind::Town && w.kind != WorldObj::Kind::Mine
+					&& w.kind != WorldObj::Kind::Dwelling)
+					continue;
+				const CGPathNode * n = sealPaths->getNode(w.pos, EPathfindingLayer::LAND);
+				if(n && n->reachable())
+					continue;   // open already
+				const CGObjectInstance * obj = cb->getObj(ObjectInstanceID(w.objId), false);
+				if(!obj)
+					continue;
+				const bool theirs = obj->tempOwner.isValidPlayer() && obj->tempOwner != playerID;
+				double worth = 0.0;
+				if(const auto * town = dynamic_cast<const CGTownInstance *>(obj))
+				{
+					double weekly = 0.0;
+					if(const auto * t = town->getTown())
+						for(int level = 0; level < GameConstants::CREATURES_PER_TOWN; ++level)
+						{
+							if(level >= int(t->creatures.size()) || t->creatures[level].empty())
+								continue;
+							if(const auto * cre = t->creatures[level].front().toCreature())
+								weekly += double(std::max(0, town->creatureGrowth(level)))
+									* double(std::max(0, cre->getAIValue()));
+						}
+					worth = double(town->dailyIncome()[EGameResID::GOLD]) * horizon * 1.2
+						+ weekly * horizon / 7.0;
+				}
+				else
+					worth = guardedPrizeWorth(obj);
+				if(theirs)
+					worth *= 2.0;
+				if(worth <= 0.0)
+					continue;
+				// The first guard zone the through-guards route enters, walking out
+				// from the hero, is the guard that seals it.
+				++scanShut;
+				CGPath route;
+				if(!through->getPath(route, w.pos) || route.nodes.empty())
+					continue;
+				++scanRouted;
+				int32_t sealer = -1;
+				for(auto it = route.nodes.rbegin(); it != route.nodes.rend() && sealer < 0; ++it)
+				{
+					if(!cb->getGuardingCreaturePosition(it->coord).isValid())
+						continue;
+					uint64_t strongest = 0;
+					for(const CGObjectInstance * g : cb->getGuardingCreatures(it->coord))
+					{
+						const auto * armed = dynamic_cast<const CArmedInstance *>(g);
+						if(armed && uint64_t(armed->getArmyStrength()) >= strongest)
+						{
+							strongest = uint64_t(armed->getArmyStrength());
+							sealer = g->id.getNum();
+						}
+					}
+				}
+				if(sealer < 0)
+					continue;
+				sealed[sealer] += worth;
+				sealedS4[sealer] += worthOf(obj, field);
+				if(sealedWhat[sealer].size() < 80)
+					sealedWhat[sealer] += std::string(sealedWhat[sealer].empty() ? "" : ", ")
+						+ obj->getObjectName();
+			}
+			decisionLog_->detail("   SEALSCAN " + std::to_string(scanShut) + " shut, "
+				+ std::to_string(scanRouted) + " routed through guards, "
+				+ std::to_string(sealed.size()) + " guard(s) credited");
+			for(const auto & entry : sealed)
+			{
+				const auto * guard = dynamic_cast<const CArmedInstance *>(
+					cb->getObj(ObjectInstanceID(entry.first), false));
+				if(!guard || !expectedToWin(field, guard, commitMargin(field)))
+					continue;
+				const omniai::CombatVerdict v = combatVerdict(field, guard);
+				const double cost = (1.0 - v.margin) * double(field->getArmyStrength());
+				if(!v.win || cost >= entry.second || !leashAllows(field, guard->visitablePos()))
+					continue;
+				CGPath route;
+				if(!sealPaths->getPath(route, guard->visitablePos()) || route.nodes.empty())
+					continue;
+				const double value = (entry.second - cost) / double(1 + route.nodes.front().turns);
+				if(value > bestPrizeValue)
+				{
+					bestPrizeValue = value;
+					bestPrize = RegTask();
+					bestPrize.kind = RegTask::Kind::Guard;
+					bestPrize.objId = guard->id.getNum();
+					bestPrize.pos = guard->visitablePos();
+					bestPrize.str = uint64_t(guard->getArmyStrength());
+					bestPrize.ready = true;
+					bestPrize.heroId = fieldHeroId_;
+					bestPrize.perDay = (sealedS4[entry.first] - cost) / double(1 + route.nodes.front().turns);   // S4
+					std::ostringstream o;
+					o << "   SEAL " << guard->getObjectName() << " at " << guard->visitablePos().toString()
+					  << " seals " << int(entry.second) << " (" << sealedWhat[entry.first] << "), the fight costs "
+					  << int(cost) << " (keeps " << int(v.margin * 100.0 + 0.5) << "%), "
+					  << int(route.nodes.front().turns) << " day(s) off";
+					bestPrizeNote = o.str();
+				}
+			}
+		}
+	}
+
 	// One at a time: the field hero takes the best, the rest wait a day.
 	if(bestPrize.objId >= 0)
 	{
@@ -3902,7 +4167,18 @@ void OmniAI::refreshTasks()
 			decisionLog_->detail("capture of " + town->getNameTranslated()
 				+ " parked: route crosses a deferred fight");
 		if(t.ready)
+		{
 			t.heroId = cap->id.getNum();
+			// S4: the capture's bid, the town's worth less the siege over the days.
+			auto capPaths = pathCache_ ? pathCache_->getPathsInfo(cap) : nullptr;
+			CGPath capRoute;
+			double capDays = 1000.0;
+			if(capPaths && capPaths->getPath(capRoute, t.pos) && !capRoute.nodes.empty())
+				capDays = double(capRoute.nodes.front().turns) + std::clamp(1.0
+					- double(capRoute.nodes.front().moveRemains) / double(std::max(1, cap->movementPointsLimit(true))),
+					0.0, 1.0);
+			t.perDay = (worthOf(town, cap) - (1.0 - v.margin) * double(cap->getArmyStrength())) / (1.0 + capDays);
+		}
 		regTasks_.push_back(t);
 	}
 
@@ -6347,6 +6623,54 @@ bool OmniAI::leashAllows(const CGHeroInstance * hero, const int3 & end) const
 	return ourDays < theirDays;
 }
 
+bool OmniAI::sweepNearbyLoot(const CGHeroInstance * hero, CPathsInfo * paths)
+{
+	// SW1, September 27th (PREREG-SW1.md): Nullkiller takes every positive-
+	// value pickup nearest first; our heroes walked past loot 131 times in
+	// three ledger games (a gold pile three tiles from the field hero on day
+	// 1, a chest beside a fight on day 3). A few steps for a pile, a chest or
+	// an artifact always pays, so it goes ahead of every errand.
+	constexpr size_t SWEEP_STEPS = 6;
+	if(!cb || !hero || !paths)
+		return false;
+	const CGObjectInstance * best = nullptr;
+	std::vector<int3> bestSteps;
+	for(const CGObjectInstance * obj : cb->getAllVisitableObjs())
+	{
+		if(!obj)
+			continue;
+		switch(obj->ID.toEnum())
+		{
+			case Obj::RESOURCE: case Obj::TREASURE_CHEST: case Obj::CAMPFIRE: case Obj::ARTIFACT:
+			case Obj::SPELL_SCROLL: case Obj::SEA_CHEST: case Obj::FLOTSAM:
+				break;
+			default:
+				continue;
+		}
+		if(guardStrengthAt(obj->visitablePos(), hero) > 0)
+			continue;
+		std::vector<int3> steps = stepsToward(paths, hero, obj->visitablePos());
+		if(steps.empty() || steps.size() > SWEEP_STEPS)
+			continue;
+		if(hero->convertToVisitablePos(steps.back()) != obj->visitablePos())
+			continue;   // not reached today
+		if(safePrefix(hero, steps) != steps.size())
+			continue;
+		if(withinEnemyReach(obj->visitablePos(), hero) || !leashAllows(hero, obj->visitablePos()))
+			continue;
+		if(!best || steps.size() < bestSteps.size())
+		{
+			best = obj;
+			bestSteps = std::move(steps);
+		}
+	}
+	if(!best)
+		return false;
+	decisionLog_->line("   SWEEP " + std::string(best->getObjectName()) + " at "
+		+ best->visitablePos().toString() + ", " + std::to_string(bestSteps.size()) + " steps");
+	return walk(hero, bestSteps);
+}
+
 bool OmniAI::walk(const CGHeroInstance * hero, const std::vector<int3> & steps,
 	bool finalFightOk, bool ignoreLeash)
 {
@@ -7597,6 +7921,9 @@ void OmniAI::moveBestHero(const CGHeroInstance * hero)
 	// asks whether the hero survives the enemy's next turn where it ends.
 	if(homePaths && escapeStrongerHero(hero, const_cast<CPathsInfo *>(homePaths.get())))
 		return;
+	// SW1: loot beside the hero first, whoever the hero is.
+	if(homePaths && sweepNearbyLoot(hero, const_cast<CPathsInfo *>(homePaths.get())))
+		return;
 
 	// A hero standing in a town we just captured leaves a holding garrison
 	// before it moves on, so the walls are not a free walk-in for the next
@@ -7716,14 +8043,60 @@ void OmniAI::moveBestHero(const CGHeroInstance * hero)
 			// and four of six games over inside a week. It is once a day, on
 			// the field hero's first call - running it every round starves
 			// the housekeeping chains several times over.
-			constexpr double RESERVED_LOOK_WORTH = 300.0;
+			// S2: the scoring pass is in army value per day now. 1500 sits above a
+			// 1000-gold or 10-wood pile a day's walk away (900-1200) and below any
+			// mine or dwelling in reach.
+			// S4, September 27th (PREREG-S4.md): the value behaviours bid in army
+			// value per day, priced by one function (worthOf): the ready task, the
+			// scoring pass's pick (a peek that moves nothing), the home errand, the
+			// hunt of a weaker hero, the grind. On the first call of the day a bid
+			// of at least the reserved look's 1500 a day runs ahead of the strategic
+			// chain, best first, as the look did; otherwise the chain runs first and
+			// the positive bids follow, best first. A declining behaviour passes on.
+			constexpr double S4_PREEMPT = 1500.0;
 			const int today = cb->getDate(Date::DAY);
-			if(today != reservedLookDay_)
-			{
+			const bool firstLook = today != reservedLookDay_;
+			if(firstLook)
 				reservedLookDay_ = today;
-				if(scoringPassMove(hero, RESERVED_LOOK_WORTH))
-					return;
+			struct S4Bid { int who; double perDay; };
+			std::vector<S4Bid> bids;
+			if(const RegTask * t = assignedTask(hero))
+				if(t->kind == RegTask::Kind::Guard || t->kind == RegTask::Kind::Capture)
+					bids.push_back({0, t->perDay});
+			s4Peek_ = true;
+			s4PeekScore_ = 0.0;
+			scoringPassMove(hero, 0.0);
+			s4Peek_ = false;
+			bids.push_back({1, s4PeekScore_});
+			bids.push_back({2, bidHome(hero, fp)});
+			bids.push_back({3, bidHunt(hero, fp)});
+			bids.push_back({4, bidGrind(hero, fp)});
+			std::stable_sort(bids.begin(), bids.end(),
+				[](const S4Bid & a, const S4Bid & b){ return a.perDay > b.perDay; });
+			{
+				static const char * const S4_NAMES[] = {"task", "object", "home", "hunt", "grind"};
+				std::ostringstream o;
+				o << "   BIDS" << (firstLook ? " (first look)" : "");
+				for(const auto & b : bids)
+					o << " " << S4_NAMES[b.who] << " " << int(b.perDay);
+				decisionLog_->detail(o.str());
 			}
+			auto runBid = [&](int who) -> bool
+			{
+				switch(who)
+				{
+					case 0: return runRegistryTask(hero, fp);
+					case 1: return scoringPassMove(hero, 0.0);
+					case 2: return runHomeErrand(hero, fp);
+					case 3: return huntWeakEnemyHero(hero, fp);
+					case 4: return grindNearestFight(hero, fp);
+				}
+				return false;
+			};
+			if(firstLook)
+				for(const auto & b : bids)
+					if(b.perDay >= S4_PREEMPT && runBid(b.who))
+						return;
 			// seekCrossing sits ahead of every order that walks at the
 			// enemy: on Emerald Isles (R6z_water) the hunt and the siege
 			// press each reached the same shore tile and ended the turn
@@ -7731,17 +8104,16 @@ void OmniAI::moveBestHero(const CGHeroInstance * hero)
 			// land route exists, fog included.
 			if(resupplyMarch(hero, fp)
 				|| pressCapital(hero, fp)
-				|| runRegistryTask(hero, fp)
 				|| runDeferredGuards(hero, fp)
 				|| seekCrossing(hero, fp)
-				|| huntWeakEnemyHero(hero, fp)
 				|| raidEnemyCapital(hero, fp)
-				|| grindNearestFight(hero, fp)
 				|| scoutMarch(hero, fp)
 				|| sallyOut(hero, fp)
-				|| runHomeErrand(hero, fp)
 				|| conquestMarch(hero, fp))
 				return;
+			for(const auto & b : bids)
+				if(b.perDay > 0.0 && runBid(b.who))
+					return;
 		}
 
 		// Scouting mandate. exploreFrontier has only ever run as a fallback:
@@ -7785,6 +8157,225 @@ void OmniAI::moveBestHero(const CGHeroInstance * hero)
 	// the universal fallback: best reachable object, or explore when there
 	// is none. Ungated here - the reserved look above already had its turn.
 	scoringPassMove(hero, 0.0);
+}
+
+double OmniAI::xpWorth(const CGHeroInstance * hero, double xp) const
+{
+	// S4, S2's experience price: a level is one primary skill point, about 5%
+	// of the army's fighting value; experience counts as its share of the next.
+	if(!hero)
+		return 0.0;
+	const double ours = double(std::max<uint64_t>(1, hero->getArmyStrength()));
+	const ui32 lvl = hero->level;
+	const double need = double(LIBRARY->heroh->reqExp(lvl + 1) - LIBRARY->heroh->reqExp(lvl));
+	return need > 0.0 ? std::max(0.0, xp) / need * 0.05 * ours : 0.0;
+}
+
+double OmniAI::worthOf(const CGObjectInstance * obj, const CGHeroInstance * hero)
+{
+	// S4: S2's valuation as a member, so every bid prices things one way (army
+	// value; the build planner's resource prices x 1.2 army per gold; a stream
+	// over valueHorizonDays() at 3% a day; scarcity capped at 2; the enemy's
+	// property twice). PREREG-S2.md has each value's basis.
+	if(!obj || !hero || !cb)
+		return 0.0;
+	constexpr double APG = 1.2;
+	constexpr double RATE = 0.03;
+	const double annuity = (1.0 - std::pow(1.0 + RATE, -valueHorizonDays())) / RATE;
+	auto price = [](int res) -> double
+	{
+		if(res == GameResID(EGameResID::GOLD).getNum())
+			return 1.0;
+		if(res == GameResID(EGameResID::WOOD).getNum() || res == GameResID(EGameResID::ORE).getNum())
+			return 100.0;
+		return 200.0;
+	};
+	auto shortOf = [this](int res) -> double
+	{
+		const double sc = (res >= 0 && res < int(scarcity_.size())) ? scarcity_[res] : 1.0;
+		return std::clamp(sc, 1.0, 2.0);
+	};
+	const bool own = obj->tempOwner == hero->tempOwner;
+	const bool theirs = obj->tempOwner.isValidPlayer() && !own;
+	const double deny = theirs ? 2.0 : 1.0;
+	if(const auto * mine = dynamic_cast<const CGMine *>(obj))
+	{
+		if(own)
+			return 0.0;
+		const int res = mine->producedResource.getNum();
+		return double(mine->producedQuantity) * price(res) * APG * annuity * shortOf(res) * deny;
+	}
+	if(const auto * pile = dynamic_cast<const CGResource *>(obj))
+	{
+		const int res = pile->resourceID().getNum();
+		return double(pile->getAmount()) * price(res) * APG * shortOf(res);
+	}
+	if(const auto * town = dynamic_cast<const CGTownInstance *>(obj))
+	{
+		if(own)
+			return double(townBusinessValue(town, hero));
+		double weekly = 0.0;
+		if(const auto * t = town->getTown())
+			for(int level = 0; level < GameConstants::CREATURES_PER_TOWN; ++level)
+			{
+				if(level >= int(t->creatures.size()) || t->creatures[level].empty())
+					continue;
+				if(const auto * cre = t->creatures[level].front().toCreature())
+					weekly += double(std::max(0, town->creatureGrowth(level)))
+						* double(std::max(0, cre->getAIValue()));
+			}
+		const double income = double(town->dailyIncome()[EGameResID::GOLD]);
+		return (income * APG * annuity + weekly * annuity / 7.0) * deny;
+	}
+	if(const auto * dw = dynamic_cast<const CGDwelling *>(obj))
+	{
+		const double stock = double(recruitsOnOffer(obj));
+		if(own)
+			return dwellingOffersRecruits(dw, hero) ? stock : 0.0;
+		double weekly = 0.0;
+		for(const auto & level : dw->creatures)
+		{
+			if(level.second.empty())
+				continue;
+			if(const auto * cre = level.second.front().toCreature())
+				weekly += double(std::max(1, cre->getGrowth())) * double(std::max(0, cre->getAIValue()));
+		}
+		return (stock + weekly * annuity / 7.0) * deny;
+	}
+	if(const auto * art = dynamic_cast<const CGArtifact *>(obj))
+	{
+		const auto * inst = art->getArtifactInstance();
+		return (inst && inst->getType()) ? double(inst->getType()->getPrice()) * APG : 0.0;
+	}
+	if(obj->ID == Obj::PRISON)
+	{
+		const auto * held = dynamic_cast<const CGHeroInstance *>(obj);
+		return double(GameConstants::HERO_GOLD_COST) * APG + (held ? double(held->getArmyStrength()) : 0.0);
+	}
+	if(dynamic_cast<const CGHeroInstance *>(obj))
+		return 0.0;
+	if(const auto * rw = dynamic_cast<const Rewardable::Interface *>(obj))
+	{
+		double best = 0.0;
+		for(ui32 index : rw->getAvailableRewards(hero, Rewardable::EEventType::EVENT_FIRST_VISIT))
+		{
+			if(index >= rw->configuration.info.size())
+				continue;
+			const auto & reward = rw->configuration.info[index].reward;
+			double v = xpWorth(hero, double(reward.heroExperience));
+			for(int r = 0; r < GameConstants::RESOURCE_QUANTITY; ++r)
+				v += double(std::max(0, int(reward.resources[GameResID(r)]))) * price(r) * APG;
+			best = std::max(best, v);
+		}
+		return best;
+	}
+	return 0.0;
+}
+
+namespace
+{
+double s4Days(const CGPath & route, const CGHeroInstance * hero)
+{
+	if(route.nodes.empty() || !hero)
+		return 1000.0;
+	const CGPathNode & end = route.nodes.front();
+	const double maxMp = double(std::max(1, hero->movementPointsLimit(true)));
+	return double(end.turns) + std::clamp(1.0 - double(end.moveRemains) / maxMp, 0.0, 1.0);
+}
+}
+
+double OmniAI::bidHome(const CGHeroInstance * hero, CPathsInfo * paths)
+{
+	// runHomeErrand's pick: a town of ours whose business is at least 0.15 of
+	// the army, with a route; its business value over one plus the days.
+	if(!cb || !hero || !paths)
+		return 0.0;
+	const double ours = double(std::max<uint64_t>(1, hero->getArmyStrength()));
+	double best = 0.0;
+	for(const CGTownInstance * town : cb->getTownsInfo())
+	{
+		if(!town || town->tempOwner != playerID || town->visitablePos() == hero->visitablePos())
+			continue;
+		const double value = double(townBusinessValue(town, hero));
+		if(value < ours * 0.15)
+			continue;
+		CGPath route;
+		if(!paths->getPath(route, town->visitablePos()) || route.nodes.empty())
+			continue;
+		best = std::max(best, value / (1.0 + s4Days(route, hero)));
+	}
+	return best;
+}
+
+double OmniAI::bidHunt(const CGHeroInstance * hero, CPathsInfo * paths)
+{
+	// huntWeakEnemyHero's pick: reached today, won at its bar, not ending in a
+	// stronger hero's reach, inside the leash; worth its army, the hire the
+	// enemy needs to replace it, and the experience; less the fight.
+	if(!cb || !hero || !paths)
+		return 0.0;
+	const double ours = double(std::max<uint64_t>(1, hero->getArmyStrength()));
+	double best = 0.0;
+	for(const CGObjectInstance * obj : cb->getAllVisitableObjs())
+	{
+		const auto * e = dynamic_cast<const CGHeroInstance *>(obj);
+		if(!e || !e->tempOwner.isValidPlayer() || e->tempOwner == playerID)
+			continue;
+		if(!expectedToWin(hero, e, 0.75))
+			continue;
+		CGPath route;
+		if(!paths->getPath(route, e->visitablePos()) || route.nodes.empty() || route.nodes.front().turns != 0)
+			continue;
+		if(withinEnemyReach(e->visitablePos(), hero) || !leashAllows(hero, e->visitablePos()))
+			continue;
+		const omniai::CombatVerdict v = combatVerdict(hero, e);
+		double xp = 500.0;
+		for(const auto & st : e->Slots())
+			if(st.second && st.second->getCreature())
+				xp += double(st.second->getCount()) * std::max(1.0, double(st.second->getCreature()->getMaxHealth()));
+		const double worth = double(e->getArmyStrength()) + double(GameConstants::HERO_GOLD_COST) * 1.2
+			+ xpWorth(hero, xp);
+		const double cost = (1.0 - v.margin) * ours;
+		best = std::max(best, (worth - cost) / (1.0 + s4Days(route, hero)));
+	}
+	return best;
+}
+
+double OmniAI::bidGrind(const CGHeroInstance * hero, CPathsInfo * paths)
+{
+	// grindNearestFight's pick: a guard reached today at the grind bar, on a
+	// safe route, inside the leash; worth its experience, less the fight.
+	if(!cb || !hero || !paths)
+		return 0.0;
+	const double ours = double(std::max<uint64_t>(1, hero->getArmyStrength()));
+	const double bar = std::max(grindSurvivor(), commitMargin(hero));
+	double best = 0.0;
+	for(const auto & kv : worldObjs_)
+	{
+		const WorldObj & w = kv.second;
+		if(w.kind != WorldObj::Kind::Guard)
+			continue;
+		const auto * g = dynamic_cast<const CArmedInstance *>(cb->getObj(ObjectInstanceID(w.objId), false));
+		if(!g || (g->tempOwner.isValidPlayer() && g->tempOwner == playerID))
+			continue;
+		if(!expectedToWin(hero, g, bar))
+			continue;
+		CGPath route;
+		if(!paths->getPath(route, g->visitablePos()) || route.nodes.empty() || route.nodes.front().turns != 0)
+			continue;
+		std::vector<int3> steps = stepsToward(paths, hero, g->visitablePos());
+		if(steps.empty() || safePrefix(hero, steps, true) != steps.size())
+			continue;
+		if(!leashAllows(hero, g->visitablePos()))
+			continue;
+		const omniai::CombatVerdict v = combatVerdict(hero, g);
+		double xp = 0.0;
+		for(const auto & st : g->Slots())
+			if(st.second && st.second->getCreature())
+				xp += double(st.second->getCount()) * std::max(1.0, double(st.second->getCreature()->getMaxHealth()));
+		best = std::max(best, (xpWorth(hero, xp) - (1.0 - v.margin) * ours) / (1.0 + s4Days(route, hero)));
+	}
+	return best;
 }
 
 bool OmniAI::scoringPassMove(const CGHeroInstance * hero, double minScoreToTake)
@@ -7842,54 +8433,194 @@ bool OmniAI::scoringPassMove(const CGHeroInstance * hero, double minScoreToTake)
 	// scorer is often unreachable (across water, walled off, occupied
 	// tile), and getPath is a cheap lookup into the precomputed paths -
 	// so iterate rather than idling the hero on a single best.
-	std::vector<Scored> ranked(results.begin(), results.end());
-	auto byScore = [](const Scored & a, const Scored & b){ return a.score > b.score; };
-	std::sort(ranked.begin(), ranked.end(), byScore);
-
-	// Second pass, this thread only, and only for candidates with a real
-	// chance of winning. The shadow-DAG term is the expensive half of the
-	// score and the only part that reads the live bonus graph, so running it
-	// here instead of in the arena takes the concurrent readers from every
-	// worker times every object down to one thread times a couple of dozen
-	// objects. The engine can still relink a node underneath us, but the
-	// window is a fraction of what it was.
-	//
-	// Skipped outright while one of our heroes is in a fight. That is when
-	// the engine rebuilds bonus tables hardest, and this is the only part of
-	// the score that reads them. Waiting for the battle instead was tried
-	// and deadlocked: the handlers that END a battle are queued on the same
-	// four-worker pool that runs the turn, so a worker parked on a battle
-	// starves the answer that would finish it. It froze the game twice for
-	// the full 60 second deadline in one 240 second soak. Losing the DAG
-	// term for one round costs a little accuracy and nothing else.
-	constexpr size_t DEEP_SCORED = 24;
-	if(battlesActive_.load() == 0)
+	// S2, September 27th (the Gemini report's Steps 2 and 3; PREREG-S2.md). Every candidate in army
+	// value, the unit of buildingValue, guardedPrizeWorth and the fight verdicts, less the army its
+	// guard would cost, divided by one plus the days the pathfinder needs to reach it. Replaces the
+	// evaluator's flat points and 1.5 per tile, fightValue's +-600 and strategicBonus's 900/350.
+	constexpr double S2_APG = 1.2;     // army per gold, buildingValue's rate
+	constexpr double S2_RATE = 0.03;   // daily discount on a stream, the report's 3%
+	const double s2Annuity = (1.0 - std::pow(1.0 + S2_RATE, -valueHorizonDays())) / S2_RATE;
+	auto s2Price = [](int res) -> double
 	{
-		const size_t deep = std::min<size_t>(ranked.size(), DEEP_SCORED);
-		for(size_t i = 0; i < deep; ++i)
+		// The build planner's list (goldEquivalent in buildInTown).
+		if(res == GameResID(EGameResID::GOLD).getNum())
+			return 1.0;
+		if(res == GameResID(EGameResID::WOOD).getNum() || res == GameResID(EGameResID::ORE).getNum())
+			return 100.0;
+		return 200.0;
+	};
+	auto s2Short = [this](int res) -> double
+	{
+		const double sc = (res >= 0 && res < int(scarcity_.size())) ? scarcity_[res] : 1.0;
+		return std::clamp(sc, 1.0, 2.0);
+	};
+	const double s2Ours = double(std::max<uint64_t>(1, hero->getArmyStrength()));
+	auto s2XpWorth = [&](double xp) -> double
+	{
+		// A level is one primary skill point, about 5% of the army's fighting value (H3's 5% per
+		// point of attack or defense); experience counts as its share of the next level.
+		const ui32 lvl = hero->level;
+		const double need = double(LIBRARY->heroh->reqExp(lvl + 1) - LIBRARY->heroh->reqExp(lvl));
+		return need > 0.0 ? std::max(0.0, xp) / need * 0.05 * s2Ours : 0.0;
+	};
+	auto s2Worth = [&](const CGObjectInstance * obj) -> double
+	{
+		const bool own = obj->tempOwner == hero->tempOwner;
+		const bool theirs = obj->tempOwner.isValidPlayer() && !own;
+		const double deny = theirs ? 2.0 : 1.0;   // taken from them counts twice in a duel
+		if(const auto * mine = dynamic_cast<const CGMine *>(obj))
 		{
-			const int64_t oid = registry_->resolve(ranked[i].h);
-			const CGObjectInstance * cand = oid >= 0
+			if(own)
+				return 0.0;
+			const int res = mine->producedResource.getNum();
+			return double(mine->producedQuantity) * s2Price(res) * S2_APG * s2Annuity * s2Short(res) * deny;
+		}
+		if(const auto * pile = dynamic_cast<const CGResource *>(obj))
+		{
+			const int res = pile->resourceID().getNum();
+			return double(pile->getAmount()) * s2Price(res) * S2_APG * s2Short(res);
+		}
+		if(const auto * town = dynamic_cast<const CGTownInstance *>(obj))
+		{
+			if(own)
+				return double(townBusinessValue(town, hero));
+			// A town not ours: its gold income and its built dwellings' weekly growth over
+			// the horizon, twice over if the enemy holds it. Its defence is priced below as
+			// a siege (combatVerdict counts the walls).
+			double weekly = 0.0;
+			if(const auto * t = town->getTown())
+				for(int level = 0; level < GameConstants::CREATURES_PER_TOWN; ++level)
+				{
+					if(level >= int(t->creatures.size()) || t->creatures[level].empty())
+						continue;
+					if(const auto * cre = t->creatures[level].front().toCreature())
+						weekly += double(std::max(0, town->creatureGrowth(level)))
+							* double(std::max(0, cre->getAIValue()));
+				}
+			const double income = double(town->dailyIncome()[EGameResID::GOLD]);
+			return (income * S2_APG * s2Annuity + weekly * s2Annuity / 7.0) * deny;
+		}
+		if(const auto * dw = dynamic_cast<const CGDwelling *>(obj))
+		{
+			const double stock = double(recruitsOnOffer(obj));
+			if(own)
+				return dwellingOffersRecruits(dw, hero) ? stock : 0.0;
+			double weekly = 0.0;
+			for(const auto & level : dw->creatures)
+			{
+				if(level.second.empty())
+					continue;
+				if(const auto * cre = level.second.front().toCreature())
+					weekly += double(std::max(1, cre->getGrowth())) * double(std::max(0, cre->getAIValue()));
+			}
+			return (stock + weekly * s2Annuity / 7.0) * deny;
+		}
+		if(const auto * art = dynamic_cast<const CGArtifact *>(obj))
+		{
+			const auto * inst = art->getArtifactInstance();
+			return (inst && inst->getType()) ? double(inst->getType()->getPrice()) * S2_APG : 0.0;
+		}
+		if(obj->ID == Obj::PRISON)
+		{
+			const auto * held = dynamic_cast<const CGHeroInstance *>(obj);
+			return double(GameConstants::HERO_GOLD_COST) * S2_APG
+				+ (held ? double(held->getArmyStrength()) : 0.0);
+		}
+		if(dynamic_cast<const CGHeroInstance *>(obj))
+			return 0.0;   // the hunt owns enemy heroes
+		if(const auto * rw = dynamic_cast<const Rewardable::Interface *>(obj))
+		{
+			double best = 0.0;
+			for(ui32 index : rw->getAvailableRewards(hero, Rewardable::EEventType::EVENT_FIRST_VISIT))
+			{
+				if(index >= rw->configuration.info.size())
+					continue;
+				const auto & reward = rw->configuration.info[index].reward;
+				double v = s2XpWorth(double(reward.heroExperience));
+				for(int r = 0; r < GameConstants::RESOURCE_QUANTITY; ++r)
+					v += double(std::max(0, int(reward.resources[GameResID(r)]))) * s2Price(r) * S2_APG;
+				best = std::max(best, v);
+			}
+			return best;
+		}
+		return 0.0;
+	};
+
+	std::vector<Scored> ranked;
+	{
+		auto s2Shared = pathCache_ ? pathCache_->getPathsInfo(hero) : nullptr;
+		auto * s2Paths = s2Shared ? const_cast<CPathsInfo *>(s2Shared.get()) : nullptr;
+		const double maxMp = double(std::max(1, hero->movementPointsLimit(true)));
+		for(const auto & r : results)
+		{
+			const int64_t oid = registry_->resolve(r.h);
+			const CGObjectInstance * obj = oid >= 0
 				? cb->getObj(ObjectInstanceID(int32_t(oid)), false) : nullptr;
-			if(!cand)
+			if(!obj)
 				continue;
+			double worth = 0.0;
 			try
 			{
-				ranked[i].score += evaluator_->shadowTerm(*cand, *hero);
-				// What the fight for it costs, and what it hands over.
-				ranked[i].score += fightValue(cand, hero);
-				// And whether we are in any position to go and take it.
-				ranked[i].score += strategicBonus(cand);
+				worth = s2Worth(obj);
 			}
 			catch(const std::exception & e)
 			{
-				logAi->warn("OmniAI: shadow term failed for object %d: %s",
-					int(oid), e.what());
+				logAi->warn("OmniAI: S2 could not value object %d: %s", int(oid), e.what());
+				continue;
 			}
+			if(omniai::LearningStore::instance().isDepleted(obj->id.getNum()))
+				worth *= 0.1;
+			if(worth <= 0.0)
+				continue;
+			// No route known: kept at the bottom, where the route loop below
+			// reports it the way it always has.
+			double days = 1000.0;
+			if(s2Paths)
+			{
+				CGPath route;
+				if(s2Paths->getPath(route, obj->visitablePos()) && !route.nodes.empty())
+				{
+					const CGPathNode & end = route.nodes.front();
+					days = double(end.turns)
+						+ std::clamp(1.0 - double(end.moveRemains) / maxMp, 0.0, 1.0);
+				}
+			}
+			double cost = 0.0;
+			const auto * townObj = dynamic_cast<const CGTownInstance *>(obj);
+			if(townObj && townObj->tempOwner != hero->tempOwner)
+			{
+				if(townDefenseStrength(townObj) > 0.0)
+				{
+					const omniai::CombatVerdict v = combatVerdict(hero, townObj);
+					if(!v.win || v.margin < commitMargin(hero))
+						continue;
+					cost = (1.0 - v.margin) * s2Ours;
+				}
+			}
+			else if(guardStrengthAt(obj->visitablePos(), hero) > 0)
+			{
+				const CArmedInstance * guard = strongestHostileAt(obj->visitablePos(), hero);
+				if(!guard)
+					continue;
+				const omniai::CombatVerdict v = combatVerdict(hero, guard);
+				if(!v.win || v.margin < commitMargin(hero))
+					continue;
+				double xp = 0.0;
+				for(const auto & st : guard->Slots())
+					if(st.second && st.second->getCreature())
+						xp += double(st.second->getCount())
+							* std::max(1.0, double(st.second->getCreature()->getMaxHealth()));
+				cost = (1.0 - v.margin) * s2Ours - s2XpWorth(xp);
+			}
+			const double score = (worth - cost) / (1.0 + days);
+			if(score > 0.0)
+				ranked.push_back({r.h, score});
 		}
-		std::sort(ranked.begin(), ranked.begin() + deep, byScore);
+		std::sort(ranked.begin(), ranked.end(),
+			[](const Scored & a, const Scored & b){ return a.score > b.score; });
 	}
 
+	if(!s4Peek_)   // S4: a peek does not print the candidate list
 	{
 		std::ostringstream o;
 		o << "  " << hero->getNameTranslated() << " at " << hero->visitablePos().toString()
@@ -8132,6 +8863,13 @@ bool OmniAI::scoringPassMove(const CGHeroInstance * hero, double minScoreToTake)
 	// to at all. The only way to grow the bubble is to stand at its edge -
 	// walk toward the cheapest reachable tile that touches unrevealed
 	// ground, and the next round has new objects to score.
+	// S4: a peek has its pick and score now; it moves nothing.
+	if(s4Peek_)
+	{
+		s4PeekScore_ = bestObj ? bestScore : 0.0;
+		return false;
+	}
+
 	if(!bestObj && haveFallback)
 	{
 		// Buying distance first: the advance-anyway fallback walked into
@@ -10017,7 +10755,13 @@ void OmniAI::showBlockingDialog(const std::string &text, const std::vector<Compo
 				// attack and defence on every stack, for the rest of the game.
 				const int need = buildReserveCached_.load();
 				const int gold = cb->getResourceAmount(EGameResID::GOLD);
-				if(gold >= need)
+				// CH1, September 27th (PREREG-SW1.md): experience only on a
+				// fighter, and only with the saving and a hire in the purse.
+				// The old test took experience whenever no saving was set
+				// (81 of our 108 chests over 120 duel-v2 games), mostly on
+				// collectors, while the town ran short of gold.
+				const bool fighter = v->id.getNum() == fieldHeroId_ || v->id.getNum() == secondFieldId_;
+				if(fighter && gold >= need + GameConstants::HERO_GOLD_COST)
 					answer = expIdx + 1;
 				decisionLog_->line(std::string("  CHEST ") + v->getNameTranslated() + " takes "
 					+ (answer == expIdx + 1 ? "experience" : "gold") + " (gold "

@@ -454,8 +454,17 @@ private:
 		uint64_t str = 0;        // guard/garrison strength to beat, or pool value
 		bool ready = false;      // precondition currently met this round
 		int32_t heroId = -1;     // the hero assigned to it, -1 unassigned
+		double perDay = 0.0;     // S4: its bid, army value per day
 	};
 	std::vector<RegTask> regTasks_;
+	// S4: one valuation for every bid (army value), and the bids.
+	double worthOf(const CGObjectInstance * obj, const CGHeroInstance * hero);
+	double xpWorth(const CGHeroInstance * hero, double xp) const;
+	double bidHome(const CGHeroInstance * hero, CPathsInfo * paths);
+	double bidHunt(const CGHeroInstance * hero, CPathsInfo * paths);
+	double bidGrind(const CGHeroInstance * hero, CPathsInfo * paths);
+	bool s4Peek_ = false;
+	double s4PeekScore_ = 0.0;
 	int regenDay_ = -1;          // the day the registry was last rebuilt
 
 	/// A world object we have seen, kept across turns. This is the registry's
@@ -1031,6 +1040,8 @@ private:
 	/// K_duel games: 7-69 "leashed" refusals each, the same target re-picked
 	/// every round, one field hero idle days 4-11). ignoreLeash is for
 	/// retreats and evacuations, which the small-map leash must not refuse.
+	// SW1: the nearest one-shot pickup reached today within a few steps, first.
+	bool sweepNearbyLoot(const CGHeroInstance * hero, CPathsInfo * paths);
 	bool walk(const CGHeroInstance * hero, const std::vector<int3> & steps,
 		bool finalFightOk = false, bool ignoreLeash = false);
 
