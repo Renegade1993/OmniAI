@@ -12457,6 +12457,12 @@ void OmniAI::takeGarrison(const CGTownInstance * town, const CGHeroInstance * he
 	collectGarrison(town, hero);
 }
 
+void OmniAI::leaveGarrison(const CGTownInstance * town)
+{
+	if(cb && town && town->tempOwner == playerID && town->getGarrisonHero() && !town->getVisitingHero())
+		cb->swapGarrisonHero(town);
+}
+
 void OmniAI::setMainHero(int32_t heroId)
 {
 	// The legacy town code (recruitInAllTowns, heroVisitsTown, handOver)

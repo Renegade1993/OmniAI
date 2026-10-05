@@ -76,6 +76,7 @@ public:
 	std::vector<omniai::v2::TownThreat> threatenedTowns() override;
 	void giveArmy(const CGHeroInstance * from, const CGHeroInstance * to) override;
 	void takeGarrison(const CGTownInstance * town, const CGHeroInstance * hero) override;
+	void leaveGarrison(const CGTownInstance * town) override;
 	void setMainHero(int32_t heroId) override;
 	void townPhase(bool firstOfDay) override;
 	bool hireOne() override;

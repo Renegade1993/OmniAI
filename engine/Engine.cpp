@@ -96,6 +96,30 @@ void Engine::makeTurn()
 		if(pass > 1)
 			host_.townPhase(false);
 		pickMainHero();
+		// A hero in a garrison slot has no paths, so no job ever reaches it:
+		// the town code seats the doorway hero there to free the door for a
+		// hire, and nothing stepped it out again (V2M1W2 map 10: the main
+		// hero, 55444, sat in Ayer from day 26, while a support hero walked at
+		// the occupied door every pass). Out it comes, unless its town is
+		// under threat.
+		{
+			const std::vector<TownThreat> threats = host_.threatenedTowns();
+			for(const CGTownInstance * town : cb.getTownsInfo())
+			{
+				if(!town || !town->getGarrisonHero() || town->getVisitingHero())
+					continue;
+				bool threatened = false;
+				for(const TownThreat & th : threats)
+					if(th.townId == town->id.getNum())
+						threatened = true;
+				if(threatened)
+					continue;
+				const CGHeroInstance * h = town->getGarrisonHero();
+				if(pass == 1)
+					host_.logLine("   V2 UNGARRISON " + h->getNameTranslated() + " steps out of " + town->getNameTranslated());
+				host_.leaveGarrison(town);
+			}
+		}
 		const std::vector<Target> targets = proposeTargets();
 		const std::vector<Option> plan = assign(scoreOptions(targets), targets);
 		if(plan.empty())
@@ -673,6 +697,10 @@ bool Engine::scoreOne(const CGHeroInstance * hero, const CPathsInfo * paths, con
 			// coming for it itself (Gather takes it the rest of the way).
 			if(hero->visitablePos() == t.tile)
 				return false;
+			// Another of ours in the doorway: the walk ends beside it.
+			if(const auto * town = dynamic_cast<const CGTownInstance *>(obj))
+				if(town->getVisitingHero() && town->getVisitingHero() != hero)
+					return false;
 			const CGHeroInstance * main = mainHero_ >= 0 ? cb.getHero(ObjectInstanceID(mainHero_)) : nullptr;
 			const double mainArmy = main ? armyOf(main) : army;
 			if(isMain)

@@ -103,6 +103,8 @@ public:
 	virtual void giveArmy(const CGHeroInstance * from, const CGHeroInstance * to) = 0;
 	/// Moves a town's garrison onto a hero standing in it.
 	virtual void takeGarrison(const CGTownInstance * town, const CGHeroInstance * hero) = 0;
+	/// Steps a hero out of a town's garrison slot into its empty doorway.
+	virtual void leaveGarrison(const CGTownInstance * town) = 0;
 	virtual void setMainHero(int32_t heroId) = 0;
 
 	// Towns: building, recruiting and trading, and one hero hire.
