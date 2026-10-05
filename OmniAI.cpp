@@ -67,6 +67,7 @@
 #include "mapping/CMap.h"
 #include "mapping/TerrainTile.h"
 #include "networkPacks/PacksForClient.h"
+#include "UnlockGuard.h"
 #include "networkPacks/PacksForClientBattle.h"
 #include "networkPacks/PacksForServer.h"
 #include "gameState/CGameState.h"
@@ -621,6 +622,10 @@ void OmniAI::executeAsync(const char * what, std::function<void()> fn)
 	taskCv_.notify_one();
 }
 
+// True on a worker thread while it holds the game state lock in shared mode,
+// so a wait inside a task knows it may release it (OmniAI::move).
+static thread_local bool workerHoldsGameState = false;
+
 void OmniAI::asyncWorker()
 {
 	for(;;)
@@ -637,6 +642,7 @@ void OmniAI::asyncWorker()
 
 		// Held for the whole task. See executeAsync above for why.
 		std::shared_lock<std::shared_mutex> gsLock(CGameState::mutex);
+		workerHoldsGameState = true;
 
 		// A throw crossing a thread boundary terminates the process, so
 		// nothing is allowed out.
@@ -652,6 +658,7 @@ void OmniAI::asyncWorker()
 		{
 			logAi->error("OmniAI: %s failed with an unknown exception", task.first);
 		}
+		workerHoldsGameState = false;
 	}
 }
 
@@ -12304,13 +12311,35 @@ bool OmniAI::move(const CGHeroInstance * hero, const std::vector<int3> & steps)
 	// An open query blocks every pack but its reply (see walk()), and so does
 	// a battle or a movement still being resolved: the server answers a move
 	// sent then with nothing (V2M1P: every hero's walk refused at once, with
-	// no dialog open, while another of ours was fighting). Wait for queries up
-	// to 20 seconds and for the other two up to 3 (V2M1Q: a mark that never
-	// cleared made every move sit the full wait and the games reached day 11
-	// to 21 in an hour).
-	for(int i = 0; i < 400 && (openQueries_.load() > 0 || (i < 60 && (battlesOpen_.load() > 0
-		|| blockade_[0].load() || blockade_[1].load()))); ++i)
-		std::this_thread::sleep_for(std::chrono::milliseconds(50));
+	// no dialog open, while another of ours was fighting). Wait up to 20
+	// seconds, with the game state lock released as Nullkiller does
+	// (AIGateway::waitTillFree): the battle's packs need that lock to be
+	// applied, so a wait that kept it held the battle until the turn ended
+	// (V2M1R proof game: each refused walk had a battle open, and its FIGHT
+	// line came after the day's last pass). A mark still up after the wait,
+	// with no query open, is taken as stale and cleared (V2M1Q).
+	auto marked = [this]{ return battlesOpen_.load() > 0 || blockade_[0].load() || blockade_[1].load(); };
+	if(openQueries_.load() > 0 || marked())
+	{
+		auto wait = [&]{
+			for(int i = 0; i < 400 && (openQueries_.load() > 0 || marked()); ++i)
+				std::this_thread::sleep_for(std::chrono::milliseconds(50));
+		};
+		if(workerHoldsGameState)
+		{
+			auto unlock = vstd::makeUnlockSharedGuard(CGameState::mutex);
+			wait();
+		}
+		else
+			wait();
+		if(openQueries_.load() == 0 && marked())
+		{
+			logLine("   V2 STALE marks cleared after a 20 s wait, code " + std::to_string(openQueryCount()));
+			battlesOpen_.store(0);
+			blockade_[0].store(false);
+			blockade_[1].store(false);
+		}
+	}
 	++movesDispatched_;
 	dispatcher_->moveHero(hero, steps, false);
 	return true;
