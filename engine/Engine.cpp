@@ -308,11 +308,16 @@ std::vector<Target> Engine::proposeTargets()
 		if(own && !dynamic_cast<const CGDwelling *>(obj))
 			continue;
 		t.kind = Target::Kind::Visit;
-		if(main && !discovered_.count(obj->id.getNum()))
+		if(main)
 		{
-			const double v = std::max(0.0, visitValue(obj, main));
-			discovered_[obj->id.getNum()] = v;
-			discoveredSum_ += v;
+			// Its worth to the main hero now: the onward index reads it, and a
+			// weekly object already taken this week is worth nothing to it.
+			t.reward = std::max(0.0, visitValue(obj, main));
+			if(!discovered_.count(obj->id.getNum()))
+			{
+				discovered_[obj->id.getNum()] = t.reward;
+				discoveredSum_ += t.reward;
+			}
 		}
 		out.push_back(t);
 	}
@@ -819,16 +824,12 @@ std::vector<Option> Engine::scoreOptions(const std::vector<Target> & targets)
 		if(t)
 			ourTowns.insert(t->visitablePos());
 
-	// The visits on offer, by 8x8 cell, each at its worth when first seen, for
-	// onwardValue().
+	// The visits on offer, by 8x8 cell, each at its worth to the main hero
+	// now, for onwardValue().
 	onward_.clear();
 	for(const Target & t : targets)
-		if(t.kind == Target::Kind::Visit)
-		{
-			const auto d = discovered_.find(t.id.getNum());
-			if(d != discovered_.end() && d->second > 0.0)
-				onward_[{t.tile.x / 8, t.tile.y / 8, t.tile.z}].push_back({t.tile, d->second});
-		}
+		if(t.kind == Target::Kind::Visit && t.reward > 0.0)
+			onward_[{t.tile.x / 8, t.tile.y / 8, t.tile.z}].push_back({t.tile, t.reward});
 
 	std::vector<Option> options;
 	// The main hero standing in a threatened town stays there: its army, the
