@@ -134,6 +134,62 @@ void Engine::makeTurn()
 		+ " main=" + std::to_string(mainHero_) + (left.str().empty() ? "" : " |" + left.str()));
 }
 
+int Engine::chooseSecondarySkill(const CGHeroInstance * hero, const std::vector<SecondarySkill> & offered) const
+{
+	// The legacy choice was random among known skills, so a main hero could
+	// end up with Eagle Eye and Navigation while Nullkiller's took Logistics
+	// and Offence. The fighting hero values movement and the skills that
+	// multiply every stack; the others value movement and income.
+	if(offered.empty())
+		return 0;
+	const bool fighter = hero && hero->id.getNum() == mainHero_;
+	auto score = [&](SecondarySkill s) -> double
+	{
+		double v = 0.0;
+		switch(s.toEnum())
+		{
+			case SecondarySkill::LOGISTICS: v = 10; break;
+			case SecondarySkill::OFFENCE: v = fighter ? 9 : 1; break;
+			case SecondarySkill::ARMORER: v = fighter ? 9 : 1; break;
+			case SecondarySkill::EARTH_MAGIC: v = fighter ? 8 : 2; break;
+			case SecondarySkill::NECROMANCY: v = 8; break;
+			case SecondarySkill::AIR_MAGIC: v = fighter ? 6 : 2; break;
+			case SecondarySkill::TACTICS: v = fighter ? 6 : 0; break;
+			case SecondarySkill::ARCHERY: v = fighter ? 6 : 0; break;
+			case SecondarySkill::WISDOM: v = fighter ? 6 : 2; break;
+			case SecondarySkill::PATHFINDING: v = fighter ? 5 : 8; break;
+			case SecondarySkill::LEADERSHIP: v = fighter ? 5 : 1; break;
+			case SecondarySkill::RESISTANCE: v = fighter ? 5 : 0; break;
+			case SecondarySkill::INTELLIGENCE: v = fighter ? 4 : 1; break;
+			case SecondarySkill::DIPLOMACY: v = 4; break;
+			case SecondarySkill::WATER_MAGIC: v = fighter ? 4 : 1; break;
+			case SecondarySkill::FIRE_MAGIC: v = fighter ? 4 : 1; break;
+			case SecondarySkill::LUCK: v = fighter ? 4 : 1; break;
+			case SecondarySkill::SORCERY: v = fighter ? 3 : 0; break;
+			case SecondarySkill::SCOUTING: v = fighter ? 2 : 6; break;
+			case SecondarySkill::ESTATES: v = fighter ? 2 : 6; break;
+			case SecondarySkill::BALLISTICS: v = fighter ? 2 : 0; break;
+			case SecondarySkill::ARTILLERY: v = fighter ? 2 : 0; break;
+			case SecondarySkill::LEARNING: v = 2; break;
+			case SecondarySkill::MYSTICISM: v = 1; break;
+			case SecondarySkill::SCHOLAR: v = 1; break;
+			case SecondarySkill::FIRST_AID: v = 1; break;
+			case SecondarySkill::NAVIGATION: v = 0; break;
+			case SecondarySkill::EAGLE_EYE: v = 0; break;
+			default: v = 1; break;
+		}
+		// Deepening a skill the hero already has is worth a little more.
+		if(hero && hero->getSecSkillLevel(s) > 0)
+			v += 2;
+		return v;
+	};
+	int best = 0;
+	for(int i = 1; i < int(offered.size()); ++i)
+		if(score(offered[i]) > score(offered[best]))
+			best = i;
+	return best;
+}
+
 void Engine::hireToCap()
 {
 	CCallback & cb = host_.game();

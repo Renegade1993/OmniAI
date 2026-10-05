@@ -10724,7 +10724,9 @@ void OmniAI::heroGotLevel(const CGHeroInstance *hero, PrimarySkill pskill,
 	// one of the hero's 8 skill slots the way a new skill does.
 	int pick = skills.empty() ? 0
 		: CRandomGenerator::getDefault().nextInt((int)skills.size() - 1);
-	if(hero && skills.size() > 1)
+	if(engineV2_ && hero && !skills.empty())
+		pick = engineV2_->chooseSecondarySkill(hero, skills);
+	else if(hero && skills.size() > 1)
 	{
 		std::vector<int> known;
 		for(int i = 0; i < int(skills.size()); ++i)

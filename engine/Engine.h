@@ -100,6 +100,10 @@ public:
 	/// Plays one day. Called from the shell's turn, after its dawn logging.
 	void makeTurn();
 
+	/// Which of the offered secondary skills a hero takes on a level-up, as an
+	/// index into `offered`.
+	int chooseSecondarySkill(const CGHeroInstance * hero, const std::vector<SecondarySkill> & offered) const;
+
 private:
 	IEngineHost & host_;
 	Settings s_;
