@@ -34,7 +34,7 @@ struct Settings
 	double lossBudget = 0.35;
 	/// Score multiplier for a hero's previous target, so near-equal jobs do
 	/// not swap back and forth between passes.
-	double momentum = 1.15;
+	double momentum = 1.4;
 	/// Days beyond which a job is not considered.
 	double horizonDays = 14.0;
 	/// Share of a support hero's army that counts as gained when it reaches
@@ -102,6 +102,7 @@ private:
 	std::map<int32_t, int3> lastTile_;              // hero -> tile of its last job (momentum)
 	std::set<std::pair<int32_t, int3>> blocked_;     // hero/tile jobs that failed today
 	std::set<int32_t> doneToday_;                    // heroes that cannot act again today
+	std::map<std::pair<int32_t, int3>, int> visited_; // hero/tile visits made, by day
 	int movesToday_ = 0;
 
 	// Stages of one pass.

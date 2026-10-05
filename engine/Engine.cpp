@@ -385,6 +385,10 @@ double Engine::visitValue(const CGObjectInstance * obj, const CGHeroInstance * h
 		return double(pile->getAmount()) * price(res) * APG * need(res);
 	}
 
+	// A visit this hero (or this week, this side) has already made gives
+	// nothing more; the legacy price does not check that.
+	if(!dynamic_cast<const CGDwelling *>(obj) && obj->wasVisited(hero))
+		return 0.0;
 	double value = host_.worth(obj, hero);
 	// The legacy price counts experience at one times and primary skills not
 	// at all; both make the hero that fights stronger for the rest of the game.
@@ -444,6 +448,14 @@ bool Engine::scoreOne(const CGHeroInstance * hero, const CPathsInfo * paths, con
 		return false;
 	if(blocked_.count({hero->id.getNum(), t.tile}))
 		return false;
+	// A visit the hero already made and that did not use the object up is
+	// not repeated for a week (a refused dialog, a reward it cannot take).
+	if(t.kind == Target::Kind::Visit)
+	{
+		auto v = visited_.find({hero->id.getNum(), t.tile});
+		if(v != visited_.end() && day_ - v->second < 7)
+			return false;
+	}
 	const bool isMain = hero->id.getNum() == mainHero_;
 	const CGPathNode * node = paths->getPathInfo(t.tile);
 	if(!node || !node->reachable())
@@ -750,6 +762,8 @@ bool Engine::execute(const std::vector<Option> & plan, const std::vector<Target>
 		anyMoved = true;
 		++movesToday_;
 		lastTile_[o.hero] = t.tile;
+		if(hero->visitablePos() == t.tile && t.kind == Target::Kind::Visit)
+			visited_[{o.hero, t.tile}] = day_;
 
 		if(t.kind == Target::Kind::Gather)
 		{
