@@ -56,7 +56,7 @@ struct Settings
 	double needCap = 4.0;
 	double goldNeedCap = 3.0;
 	/// Passes per day, a bound.
-	int maxPasses = 30;
+	int maxPasses = 40;
 	/// Heroes kept: the first `baseHeroes`, one more per town above the
 	/// first, never more than `maxHeroes`.
 	int baseHeroes = 3;
@@ -118,6 +118,7 @@ private:
 	// Helpers.
 	double visitValue(const CGObjectInstance * obj, const CGHeroInstance * hero);
 	double levelWorth(const CGHeroInstance * hero) const;
+	double xpWorth(const CGHeroInstance * hero, double xp);
 	double xpScale(const CGHeroInstance * hero) const;
 	bool surroundingsSeen(const int3 & tile);
 	bool dangerousFor(const CGHeroInstance * hero, const int3 & tile,

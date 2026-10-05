@@ -328,9 +328,23 @@ double Engine::xpScale(const CGHeroInstance * hero) const
 double Engine::levelWorth(const CGHeroInstance * hero) const
 {
 	// One level, or one primary skill point, is about 5 percent of the army's
-	// fighting value; the army grows, so the floor keeps an early level from
-	// pricing at nothing.
-	return xpScale(hero) * 0.05 * std::max(4000.0, armyOf(hero));
+	// fighting value for the rest of the game, and the army it multiplies
+	// grows (about threefold over the next weeks, measured on both sides), so
+	// it is priced against three times today's army, with a floor so an early
+	// level is not worth nothing.
+	return xpScale(hero) * 0.05 * std::max(4000.0, 3.0 * armyOf(hero));
+}
+
+double Engine::xpWorth(const CGHeroInstance * hero, double xp)
+{
+	// The legacy price is (xp / experience to the next level) x 5 percent of
+	// the army; the share of a level is recovered from it and priced at
+	// levelWorth.
+	if(!hero || xp <= 0.0)
+		return 0.0;
+	const double legacy = host_.xpValue(hero, xp);
+	const double levelShare = legacy / (0.05 * std::max(1.0, armyOf(hero)));
+	return levelShare * levelWorth(hero);
 }
 
 double Engine::visitValue(const CGObjectInstance * obj, const CGHeroInstance * hero)
@@ -382,7 +396,7 @@ double Engine::visitValue(const CGObjectInstance * obj, const CGHeroInstance * h
 			if(index >= rw->configuration.info.size())
 				continue;
 			const auto & reward = rw->configuration.info[index].reward;
-			double e = (xpScale(hero) - 1.0) * host_.xpValue(hero, double(reward.heroExperience));
+			double e = xpWorth(hero, double(reward.heroExperience)) - host_.xpValue(hero, double(reward.heroExperience));
 			for(si32 points : reward.primary)
 				e += double(std::max(0, points)) * levelWorth(hero);
 			extra = std::max(extra, e);
@@ -479,7 +493,7 @@ bool Engine::scoreOne(const CGHeroInstance * hero, const CPathsInfo * paths, con
 			for(const auto & slot : armed->Slots())
 				if(slot.second && slot.second->getCreature())
 					xp += double(slot.second->getCount()) * double(slot.second->getCreature()->getMaxHealth());
-			reward = xpScale(hero) * host_.xpValue(hero, xp) + host_.pocketBehind(t.tile, hero);
+			reward = xpWorth(hero, xp) + host_.pocketBehind(t.tile, hero);
 			if(reward <= 0.0)
 				return false;
 			if(!priceFight(armed))
@@ -681,6 +695,15 @@ bool Engine::execute(const std::vector<Option> & plan, const std::vector<Target>
 		for(size_t i = 0; i < steps.size(); ++i)
 		{
 			const int3 tile = hero->convertToVisitablePos(steps[i]);
+			// A step beside unseen ground can walk into a guard nobody could
+			// see when the route was planned (the server fights it mid-walk).
+			// Stop short: the walk so far shows that ground, and the next pass
+			// plans the rest with it in sight.
+			if(!surroundingsSeen(tile))
+			{
+				steps.resize(i);
+				break;
+			}
 			if(pricedEnd && tile == t.tile)
 				break;
 			const CArmedInstance * foe = host_.guardOnStep(tile, hero);
