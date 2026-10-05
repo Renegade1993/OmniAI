@@ -734,21 +734,29 @@ bool Engine::scoreOne(const CGHeroInstance * hero, const CPathsInfo * paths, con
 			// coming for it itself (Gather takes it the rest of the way).
 			if(hero->visitablePos() == t.tile)
 				return false;
-			// Another of ours in the doorway: the walk ends beside it.
+			// Another of ours in the doorway: the walk ends beside it, if it
+			// ends today; one arriving later finds the doorway as it is then
+			// (most doorway heroes are a fresh hire on its way out).
 			if(const auto * town = dynamic_cast<const CGTownInstance *>(obj))
-				if(town->getVisitingHero() && town->getVisitingHero() != hero)
+				if(town->getVisitingHero() && town->getVisitingHero() != hero && node->turns == 0)
 					return false;
+			// A hero already walking to this town keeps the job at half the
+			// pool it needed to start: the pool moves with every purchase and
+			// every pickup, and a walk dropped halfway is a walk wasted (V2M1AC
+			// and AD: 93 courier and garrison walks dropped as the pool dipped).
+			const auto going = lastTile_.find(hero->id.getNum());
+			const double keep = going != lastTile_.end() && going->second == t.tile ? 0.5 : 1.0;
 			const CGHeroInstance * main = mainHero_ >= 0 ? cb.getHero(ObjectInstanceID(mainHero_)) : nullptr;
 			const double mainArmy = main ? armyOf(main) : army;
 			if(isMain)
 			{
-				if(t.reward < std::max(800.0, 0.25 * army))
+				if(t.reward < keep * std::max(800.0, 0.25 * army))
 					return false;
 				reward = s_.garrisonWorth * t.reward;
 			}
 			else
 			{
-				if(t.reward < std::max(1500.0, 0.05 * mainArmy))
+				if(t.reward < keep * std::max(1500.0, 0.05 * mainArmy))
 					return false;
 				reward = s_.courierWorth * t.reward;
 			}
@@ -959,11 +967,51 @@ std::vector<Option> Engine::scoreOptions(const std::vector<Target> & targets)
 		}
 	}
 
+	// A garrison or courier job pulls a hero off a job it has not reached
+	// only at twice that job's score. Town jobs jump as the town code buys into the
+	// garrison every pass and as the week's growth lands, and a hero dropped
+	// its walk for one: jobs given up for a town job, courier walks dropped as
+	// a pool dipped, and the recall below flipping between towns were 38% of
+	// the hero-days lost to dropped jobs in V2M1AC and AD (switch_trace.py).
+	{
+		std::map<int32_t, double> current;   // hero -> score of the unreached job it is walking to
+		for(const Option & o : options)
+		{
+			const auto lt = lastTile_.find(o.hero);
+			if(lt == lastTile_.end() || targets[o.target].tile != lt->second)
+				continue;
+			const CGHeroInstance * h = cb.getHero(ObjectInstanceID(o.hero));
+			if(!h || (lt->second.z == h->visitablePos().z && chebyshev(lt->second, h->visitablePos()) <= 2))
+				continue;
+			current[o.hero] = std::max(current[o.hero], o.score);
+		}
+		options.erase(std::remove_if(options.begin(), options.end(), [&](const Option & o)
+		{
+			const auto c = current.find(o.hero);
+			return c != current.end() && targets[o.target].kind == Target::Kind::OwnTown
+				&& targets[o.target].tile != lastTile_[o.hero] && o.score < s_.townSwitchMargin * c->second;
+		}), options.end());
+	}
+
 	// A town under threat calls the main hero home, whatever else is on offer.
+	// It stays called to the same town while that town is still threatened:
+	// the threats are re-read every pass, every recall scored the same, and
+	// the main hero was sent from one town to another and back (V2M1AD map
+	// 04, days 60-61: Kanan, then Silverspire 78 tiles away; 36 recalls
+	// dropped halfway cost 41 hero-days). Among new threats the nearest town
+	// wins.
 	const CGHeroInstance * main = mainHero_ >= 0 ? cb.getHero(ObjectInstanceID(mainHero_)) : nullptr;
+	bool recallStands = false;
+	for(const TownThreat & threat : threats)
+		if(threat.townId == recallTown_)
+			recallStands = true;
+	if(!recallStands)
+		recallTown_ = -1;
 	if(main && main->movementPointsRemaining() > 0 && !doneToday_.count(mainHero_))
 		for(const TownThreat & threat : threats)
 		{
+			if(recallStands && threat.townId != recallTown_)
+				continue;
 			const auto * town = dynamic_cast<const CGTownInstance *>(cb.getObj(ObjectInstanceID(threat.townId), false));
 			if(!town)
 				continue;
@@ -980,7 +1028,7 @@ std::vector<Option> Engine::scoreOptions(const std::vector<Target> & targets)
 					o.target = i;
 					o.reward = host_.worth(town, main);
 					o.days = double(node->turns) + 0.5;
-					o.score = 1e12;   // defending outranks every gain
+					o.score = 1e12 / (1.0 + o.days);   // defending outranks every gain; the nearest town first
 					options.push_back(o);
 				}
 		}
@@ -1143,6 +1191,8 @@ bool Engine::execute(const std::vector<Option> & plan, const std::vector<Target>
 		anyMoved = true;
 		++movesToday_;
 		lastTile_[o.hero] = t.tile;
+		if(t.kind == Target::Kind::OwnTown && o.score >= 1e10)
+			recallTown_ = t.id.getNum();   // a threat recall (see scoreOptions)
 		if(hero->visitablePos() == t.tile && t.kind == Target::Kind::Visit)
 			visited_[{o.hero, t.tile}] = day_;
 		if(hero->visitablePos() == t.tile && t.kind == Target::Kind::OwnTown && o.hero != mainHero_ && o.reward > 0.0)

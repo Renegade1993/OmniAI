@@ -68,6 +68,9 @@ struct Settings
 	/// a hero sweeps a cluster in one direction instead of hopping about it.
 	double onwardShare = 0.3;
 	int onwardRadius = 6;
+	/// A garrison or courier job takes a hero off a job it has not reached
+	/// only at this many times that job's score.
+	double townSwitchMargin = 2.0;
 	/// Passes per day, a bound.
 	int maxPasses = 40;
 	/// Heroes kept: the first `baseHeroes`, one more per town above the
@@ -116,6 +119,7 @@ private:
 
 	int day_ = 0;
 	int32_t mainHero_ = -1;
+	int32_t recallTown_ = -1;                        // the threatened town the main hero was last called to
 	std::map<int32_t, int3> lastTile_;              // hero -> tile of its last job (momentum)
 	std::set<std::pair<int32_t, int3>> blocked_;     // hero/tile jobs that failed today
 	std::set<int32_t> doneToday_;                    // heroes that cannot act again today
