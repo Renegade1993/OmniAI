@@ -11568,7 +11568,11 @@ void OmniAI::recruitFromDwelling(const CGDwelling * dwelling, const CArmedInstan
 		// growth unbought from day 8 to 11 (R7p_duel r01), and Nullkiller's
 		// army went from 14.5k to 22.7k that week while ours fell to 10.5k.
 		// On a big map with no enemy near, the savings still come first.
-		const int reserve = goldReserve + (contactSoon() ? 0 : buildReserveTotal());
+		// Under the v2 engine the week's stock comes before the planner's
+		// saving: V2M1F bought 41-46 percent of the stock offered on days 15-56
+		// with up to 35000 gold held back for buildings ("cannot afford" 373
+		// times on map 03). Buildings get the gold the rest of the week.
+		const int reserve = goldReserve + ((contactSoon() || engineV2_) ? 0 : buildReserveTotal());
 		TResources spendable = cb->getResourceAmount();
 		if(reserve > 0)
 			spendable[EGameResID::GOLD] =
@@ -12394,7 +12398,11 @@ void OmniAI::townPhase(bool firstOfDay)
 		updateResourceScarcity();
 		assessThreats();
 		assessPosture();
-		if(contactSoon() && cb->getDate(Date::DAY) <= 3)
+		// The week's new stock is bought before the day's building on the
+		// first two days of a week (and in the first days when contact comes
+		// early); the rest of the week the building goes first.
+		const int dow = cb->getDate(Date::DAY_OF_WEEK);
+		if(dow <= 2 || (contactSoon() && cb->getDate(Date::DAY) <= 3))
 			recruitInAllTowns();
 		tradeForBlockedBuilding();
 		buildInAllTowns();
