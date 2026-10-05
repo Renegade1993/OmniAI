@@ -97,7 +97,16 @@ void Engine::makeTurn()
 		pickMainHero();
 		const std::vector<Target> targets = proposeTargets();
 		const std::vector<Option> plan = assign(scoreOptions(targets), targets);
-		if(plan.empty() || !execute(plan, targets, pass))
+		if(plan.empty())
+			break;
+		// A pass in which every assigned walk failed still made progress:
+		// those jobs are now blocked for the day and the next pass gives the
+		// heroes their next-best ones. The day ends only when a pass neither
+		// moved anyone nor ruled anything out (V2M1J map 01: heroes ended
+		// days with all their movement because one failed walk ended the
+		// loop).
+		const size_t blockedBefore = blocked_.size();
+		if(!execute(plan, targets, pass) && blocked_.size() == blockedBefore)
 			break;
 	}
 
