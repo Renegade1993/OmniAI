@@ -591,6 +591,41 @@ std::vector<Option> Engine::scoreOptions(const std::vector<Target> & targets)
 			ourTowns.insert(t->visitablePos());
 
 	std::vector<Option> options;
+	// Once a day, the main hero's view of the monsters in reach: what each
+	// fight is predicted to cost and to pay, so a log shows why it fought or
+	// did not.
+	if(!monsterLogDay_.count(day_) && mainHero_ >= 0)
+	{
+		monsterLogDay_.insert(day_);
+		const CGHeroInstance * main = cb.getHero(ObjectInstanceID(mainHero_));
+		const auto shared = main ? host_.paths(main) : nullptr;
+		std::ostringstream o;
+		int n = 0;
+		for(const Target & t : targets)
+		{
+			if(t.kind != Target::Kind::Monster || !shared || n >= 8)
+				continue;
+			const CGPathNode * node = shared->getPathInfo(t.tile);
+			if(!node || !node->reachable() || node->turns > 2)
+				continue;
+			const auto * armed = dynamic_cast<const CArmedInstance *>(cb.getObj(t.id, false));
+			if(!armed)
+				continue;
+			const FightEstimate e = host_.estimate(main, armed);
+			double xp = 0.0;
+			for(const auto & slot : armed->Slots())
+				if(slot.second && slot.second->getCreature())
+					xp += double(slot.second->getCount()) * double(slot.second->getCreature()->getMaxHealth());
+			o << " " << t.name << "(" << fmt0(double(armed->getArmyStrength())) << ")"
+			  << (e.win ? " win " : " lose ") << fmt2(e.kept) << " xp " << fmt0(xp)
+			  << " r " << fmt0(xpWorth(main, xp) + host_.pocketBehind(t.tile, main))
+			  << " t" << int(node->turns) << ";";
+			++n;
+		}
+		if(n)
+			host_.logLine("   V2 MONSTERS d" + std::to_string(day_) + " " + main->getNameTranslated()
+				+ " (" + fmt0(armyOf(main)) + "):" + o.str());
+	}
 	for(const CGHeroInstance * hero : cb.getHeroesInfo())
 	{
 		if(!hero || hero->movementPointsRemaining() <= 0 || doneToday_.count(hero->id.getNum()))

@@ -104,6 +104,7 @@ private:
 	std::set<int32_t> doneToday_;                    // heroes that cannot act again today
 	std::map<std::pair<int32_t, int3>, int> visited_; // hero/tile visits made, by day
 	int movesToday_ = 0;
+	std::set<int> monsterLogDay_;
 
 	// Stages of one pass.
 	void hireToCap();
