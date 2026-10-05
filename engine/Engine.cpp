@@ -373,7 +373,7 @@ void Engine::proposeExplore(std::vector<Target> & out, double knownValue)
 	// value still lying on it fell as heroes collected it, so exploring lost
 	// to the leftovers nearby: by day 28 of the M1 gate (V2M1T) our heroes had
 	// seen 0.78 of the tiles Nullkiller's had, by day 56 0.71.
-	const double density = std::clamp(0.5 * discoveredSum_ / std::max(1, visible), 5.0, 400.0);
+	const double density = std::clamp(0.5 * discoveredSum_ / std::max(1, visible), 5.0, 150.0);
 	density_ = density;
 	const int R = 5;
 	for(int z = 0; z < size.z; ++z)
@@ -1001,6 +1001,31 @@ bool Engine::execute(const std::vector<Option> & plan, const std::vector<Target>
 			continue;
 		const auto shared = host_.paths(hero);
 		std::vector<int3> steps = host_.routeSteps(shared.get(), hero, t.tile);
+
+		// A hero leaving a job it has not reached, more than two tiles off:
+		// why the old one lost (V2M1AA: half the jobs more than a day away were
+		// dropped, 80% of them for no other hero).
+		{
+			const auto lt = lastTile_.find(o.hero);
+			if(lt != lastTile_.end() && lt->second != t.tile && lt->second != hero->visitablePos()
+				&& (lt->second.z != hero->visitablePos().z || chebyshev(lt->second, hero->visitablePos()) > 2))
+			{
+				std::string why = "gone";
+				for(const Target & old : targets)
+					if(old.tile == lt->second && (old.onlyHero < 0 || old.onlyHero == o.hero))
+					{
+						Option was;
+						if(!scoreOne(hero, shared.get(), old, was))
+							why = "unscorable (" + std::string(kindName(old.kind)) + ")";
+						else
+							why = "outscored " + fmt0(was.score) + " < " + fmt0(o.score) + " (" + kindName(old.kind)
+								+ " d=" + fmt2(was.days) + ")";
+						break;
+					}
+				host_.logLine("   V2 SWITCH " + hero->getNameTranslated() + " from " + lt->second.toString()
+					+ " to " + t.tile.toString() + ": " + why);
+			}
+		}
 
 		// The job priced its own fight at the destination. Any other guard a
 		// step would fight has to pass the same loss budget, or the walk stops
