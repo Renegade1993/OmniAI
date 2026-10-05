@@ -132,7 +132,8 @@ void Engine::makeTurn()
 	host_.logLine("   V2 d" + std::to_string(day_) + " passes=" + std::to_string(passes)
 		+ " moves=" + std::to_string(movesToday_) + " heroes=" + std::to_string(heroes)
 		+ " unmoved=" + std::to_string(idle) + " mpLeft=" + fmt0(100.0 * mpLeft / std::max(1.0, mpAll)) + "%"
-		+ " main=" + std::to_string(mainHero_) + (left.str().empty() ? "" : " |" + left.str()));
+		+ " main=" + std::to_string(mainHero_) + " dens=" + fmt0(density_)
+		+ (left.str().empty() ? "" : " |" + left.str()));
 }
 
 int Engine::chooseSecondarySkill(const CGHeroInstance * hero, const std::vector<SecondarySkill> & offered) const
@@ -283,8 +284,12 @@ std::vector<Target> Engine::proposeTargets()
 		if(own && !dynamic_cast<const CGDwelling *>(obj))
 			continue;
 		t.kind = Target::Kind::Visit;
-		if(main)
-			knownValue += std::max(0.0, visitValue(obj, main));
+		if(main && !discovered_.count(obj->id.getNum()))
+		{
+			const double v = std::max(0.0, visitValue(obj, main));
+			discovered_[obj->id.getNum()] = v;
+			discoveredSum_ += v;
+		}
 		out.push_back(t);
 	}
 
@@ -340,7 +345,11 @@ void Engine::proposeExplore(std::vector<Target> & out, double knownValue)
 					++visible;
 				}
 	const auto & visLevels = visLevels_;
-	const double density = std::clamp(0.5 * knownValue / std::max(1, visible), 5.0, 60.0);
+	// What the seen ground held when it was first seen, per seen tile. The
+	// value still lying on it fell as heroes collected it, so exploring lost
+	// to the leftovers nearby: by day 28 of the M1 gate (V2M1T) our heroes had
+	// seen 0.78 of the tiles Nullkiller's had, by day 56 0.71.
+	const double density = std::clamp(0.5 * discoveredSum_ / std::max(1, visible), 5.0, 60.0);
 	density_ = density;
 	const int R = 5;
 	for(int z = 0; z < size.z; ++z)

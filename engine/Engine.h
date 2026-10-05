@@ -61,7 +61,7 @@ struct Settings
 	/// Scores are net value to this power, per day of the hero's time. Below
 	/// 1 it favours many near jobs over one far, valuable one (Nullkiller
 	/// takes the nearest job that pays at all); 1 ranks by value per day.
-	double valueExponent = 0.8;
+	double valueExponent = 0.6;
 	/// Passes per day, a bound.
 	int maxPasses = 40;
 	/// Heroes kept: the first `baseHeroes`, one more per town above the
@@ -116,6 +116,8 @@ private:
 	std::map<int32_t, int> noMoves_;                 // walks sent today that moved nothing, per hero
 	std::map<std::pair<int32_t, int3>, int> visited_; // hero/tile visits made, by day
 	std::map<int32_t, int> gatherFailed_;            // hero -> day its hand-over to the main hero moved nothing
+	std::map<int32_t, double> discovered_;           // object -> its worth to the main hero when first seen
+	double discoveredSum_ = 0.0;
 	int movesToday_ = 0;
 	std::set<int> monsterLogDay_;
 	std::vector<std::vector<uint8_t>> visLevels_;   // tiles seen this pass, per level
