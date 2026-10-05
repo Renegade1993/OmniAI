@@ -705,7 +705,7 @@ bool Engine::scoreOne(const CGHeroInstance * hero, const CPathsInfo * paths, con
 			const double mainArmy = main ? armyOf(main) : army;
 			if(isMain)
 			{
-				if(t.reward < std::max(800.0, 0.12 * army))
+				if(t.reward < std::max(800.0, 0.25 * army))
 					return false;
 				reward = s_.garrisonWorth * t.reward;
 			}
