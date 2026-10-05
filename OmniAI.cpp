@@ -8281,17 +8281,28 @@ double OmniAI::worthOf(const CGObjectInstance * obj, const CGHeroInstance * hero
 	{
 		if(own)
 			return double(townBusinessValue(town, hero));
+		// Priced at what it becomes, at least: a Town Hall's 1000 a day and
+		// half its faction's full weekly growth, the dwellings it does not have
+		// yet being a few days' building each. Priced at what it held, a fresh
+		// neutral town (500 a day, a dwelling or two) came to half a gold mine,
+		// and in the M1 gate (V2M1T, 30 games) the v2 engine took 44 neutral
+		// towns to Nullkiller's 88.
 		double weekly = 0.0;
+		double potential = 0.0;
 		if(const auto * t = town->getTown())
 			for(int level = 0; level < GameConstants::CREATURES_PER_TOWN; ++level)
 			{
 				if(level >= int(t->creatures.size()) || t->creatures[level].empty())
 					continue;
 				if(const auto * cre = t->creatures[level].front().toCreature())
+				{
 					weekly += double(std::max(0, town->creatureGrowth(level)))
 						* double(std::max(0, cre->getAIValue()));
+					potential += double(std::max(1, cre->getGrowth())) * double(std::max(0, cre->getAIValue()));
+				}
 			}
-		const double income = double(town->dailyIncome()[EGameResID::GOLD]);
+		weekly = std::max(weekly, 0.5 * potential);
+		const double income = std::max(1000.0, double(town->dailyIncome()[EGameResID::GOLD]));
 		return (income * APG * annuity + weekly * annuity / 7.0) * deny;
 	}
 	if(const auto * dw = dynamic_cast<const CGDwelling *>(obj))
