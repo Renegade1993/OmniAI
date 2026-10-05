@@ -66,7 +66,7 @@ struct Settings
 	/// Share of the value lying just beyond a visit (within `onwardRadius`
 	/// tiles of it and further from the hero) added to that visit's worth, so
 	/// a hero sweeps a cluster in one direction instead of hopping about it.
-	double onwardShare = 0.3;
+	double onwardShare = 0.0;
 	int onwardRadius = 6;
 	/// A garrison or courier job takes a hero off a job it has not reached
 	/// only at this many times that job's score.
