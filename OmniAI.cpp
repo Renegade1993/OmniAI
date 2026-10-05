@@ -12329,6 +12329,11 @@ double OmniAI::horizonDays()
 	return valueHorizonDays();
 }
 
+double OmniAI::resourceNeed(int resource)
+{
+	return (resource >= 0 && resource < int(scarcity_.size())) ? scarcity_[resource] : 1.0;
+}
+
 std::vector<omniai::v2::FoeInfo> OmniAI::foes()
 {
 	std::vector<omniai::v2::FoeInfo> out;

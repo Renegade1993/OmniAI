@@ -47,6 +47,14 @@ struct Settings
 	double heroKillBonus = 2500.0;
 	/// Share of the enemy army destroyed that counts as gained.
 	double enemyArmyWorth = 0.5;
+	/// Experience and primary skills are worth this many times the legacy
+	/// price (5 percent of the army per level) to the main hero, and to the
+	/// others.
+	double xpScaleMain = 2.4;
+	double xpScaleSupport = 0.6;
+	/// Caps on how much a short resource multiplies a mine's or pile's worth.
+	double needCap = 4.0;
+	double goldNeedCap = 3.0;
 	/// Passes per day, a bound.
 	int maxPasses = 30;
 	/// Heroes kept: the first `baseHeroes`, one more per town above the
@@ -108,6 +116,10 @@ private:
 	bool execute(const std::vector<Option> & plan, const std::vector<Target> & targets, int pass);
 
 	// Helpers.
+	double visitValue(const CGObjectInstance * obj, const CGHeroInstance * hero);
+	double levelWorth(const CGHeroInstance * hero) const;
+	double xpScale(const CGHeroInstance * hero) const;
+	bool surroundingsSeen(const int3 & tile);
 	bool dangerousFor(const CGHeroInstance * hero, const int3 & tile,
 		const std::vector<FoeInfo> & foes) const;
 	static double armyOf(const CGHeroInstance * hero);

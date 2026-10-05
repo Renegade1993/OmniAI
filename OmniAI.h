@@ -70,6 +70,7 @@ public:
 	double pocketBehind(const int3 & guardPos, const CGHeroInstance * hero) override;
 	double xpValue(const CGHeroInstance * hero, double xp) override;
 	double horizonDays() override;
+	double resourceNeed(int resource) override;
 	std::vector<omniai::v2::FoeInfo> foes() override;
 	std::vector<omniai::v2::TownThreat> threatenedTowns() override;
 	void giveArmy(const CGHeroInstance * from, const CGHeroInstance * to) override;

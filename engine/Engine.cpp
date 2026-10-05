@@ -24,6 +24,8 @@
 #include "mapping/TerrainTile.h"
 #include "pathfinder/CGPathNode.h"
 #include "rewardable/Interface.h"
+#include "rewardable/Configuration.h"
+#include "rewardable/Reward.h"
 
 namespace omniai::v2
 {
@@ -83,8 +85,8 @@ void Engine::makeTurn()
 	doneToday_.clear();
 	movesToday_ = 0;
 
-	host_.townPhase(true);
 	hireToCap();
+	host_.townPhase(true);
 
 	int passes = 0;
 	for(int pass = 1; pass <= s_.maxPasses; ++pass)
@@ -206,7 +208,7 @@ std::vector<Target> Engine::proposeTargets()
 			continue;
 		t.kind = Target::Kind::Visit;
 		if(main)
-			knownValue += std::max(0.0, host_.worth(obj, main));
+			knownValue += std::max(0.0, visitValue(obj, main));
 		out.push_back(t);
 	}
 
@@ -318,6 +320,93 @@ void Engine::proposeExplore(std::vector<Target> & out, double knownValue)
 	}
 }
 
+double Engine::xpScale(const CGHeroInstance * hero) const
+{
+	return hero && hero->id.getNum() == mainHero_ ? s_.xpScaleMain : s_.xpScaleSupport;
+}
+
+double Engine::levelWorth(const CGHeroInstance * hero) const
+{
+	// One level, or one primary skill point, is about 5 percent of the army's
+	// fighting value; the army grows, so the floor keeps an early level from
+	// pricing at nothing.
+	return xpScale(hero) * 0.05 * std::max(4000.0, armyOf(hero));
+}
+
+double Engine::visitValue(const CGObjectInstance * obj, const CGHeroInstance * hero)
+{
+	if(!obj || !hero)
+		return 0.0;
+	const PlayerColor me = host_.me();
+	auto price = [](int res) -> double
+	{
+		if(res == GameResID(EGameResID::GOLD).getNum())
+			return 1.0;
+		if(res == GameResID(EGameResID::WOOD).getNum() || res == GameResID(EGameResID::ORE).getNum())
+			return 100.0;
+		return 200.0;
+	};
+	auto need = [&](int res) -> double
+	{
+		const double cap = res == GameResID(EGameResID::GOLD).getNum() ? s_.goldNeedCap : s_.needCap;
+		return std::clamp(host_.resourceNeed(res), 1.0, cap);
+	};
+	constexpr double APG = 1.2;
+	constexpr double RATE = 0.03;
+	const double annuity = (1.0 - std::pow(1.0 + RATE, -host_.horizonDays())) / RATE;
+
+	// A mine or a pile: what it yields, priced up by how badly the resource
+	// is needed now (a building waiting on ore makes ore the scarce thing).
+	if(const auto * mine = dynamic_cast<const CGMine *>(obj))
+	{
+		if(mine->tempOwner == me)
+			return 0.0;
+		const int res = mine->producedResource.getNum();
+		const double deny = mine->tempOwner.isValidPlayer() ? 2.0 : 1.0;
+		return double(mine->producedQuantity) * price(res) * APG * annuity * need(res) * deny;
+	}
+	if(const auto * pile = dynamic_cast<const CGResource *>(obj))
+	{
+		const int res = pile->resourceID().getNum();
+		return double(pile->getAmount()) * price(res) * APG * need(res);
+	}
+
+	double value = host_.worth(obj, hero);
+	// The legacy price counts experience at one times and primary skills not
+	// at all; both make the hero that fights stronger for the rest of the game.
+	if(const auto * rw = dynamic_cast<const Rewardable::Interface *>(obj))
+	{
+		double extra = 0.0;
+		for(ui32 index : rw->getAvailableRewards(hero, Rewardable::EEventType::EVENT_FIRST_VISIT))
+		{
+			if(index >= rw->configuration.info.size())
+				continue;
+			const auto & reward = rw->configuration.info[index].reward;
+			double e = (xpScale(hero) - 1.0) * host_.xpValue(hero, double(reward.heroExperience));
+			for(si32 points : reward.primary)
+				e += double(std::max(0, points)) * levelWorth(hero);
+			extra = std::max(extra, e);
+		}
+		value += extra;
+	}
+	return value;
+}
+
+bool Engine::surroundingsSeen(const int3 & tile)
+{
+	// A guard hidden in the fog is not priced; a job is only taken once the
+	// ground around it is in sight. Walking closer (or exploring) shows it.
+	CCallback & cb = host_.game();
+	for(int dy = -1; dy <= 1; ++dy)
+		for(int dx = -1; dx <= 1; ++dx)
+		{
+			const int3 q(tile.x + dx, tile.y + dy, tile.z);
+			if(cb.isInTheMap(q) && !cb.isVisible(q))
+				return false;
+		}
+	return true;
+}
+
 bool Engine::dangerousFor(const CGHeroInstance * hero, const int3 & tile,
 	const std::vector<FoeInfo> & foes) const
 {
@@ -372,7 +461,9 @@ bool Engine::scoreOne(const CGHeroInstance * hero, const CPathsInfo * paths, con
 		{
 			if(!obj)
 				return false;
-			reward = host_.worth(obj, hero);
+			if(!surroundingsSeen(t.tile))
+				return false;
+			reward = visitValue(obj, hero);
 			if(reward <= 0.0)
 				return false;
 			if(!priceFight(host_.guardAt(t.tile, hero)))
@@ -388,7 +479,7 @@ bool Engine::scoreOne(const CGHeroInstance * hero, const CPathsInfo * paths, con
 			for(const auto & slot : armed->Slots())
 				if(slot.second && slot.second->getCreature())
 					xp += double(slot.second->getCount()) * double(slot.second->getCreature()->getMaxHealth());
-			reward = host_.xpValue(hero, xp) + host_.pocketBehind(t.tile, hero);
+			reward = xpScale(hero) * host_.xpValue(hero, xp) + host_.pocketBehind(t.tile, hero);
 			if(reward <= 0.0)
 				return false;
 			if(!priceFight(armed))
@@ -598,6 +689,9 @@ bool Engine::execute(const std::vector<Option> & plan, const std::vector<Target>
 			const FightEstimate e = host_.estimate(hero, foe);
 			if(e.win && e.kept >= 1.0 - s_.lossBudget)
 				continue;
+			host_.logLine("   V2 STOP " + hero->getNameTranslated() + " short of " + tile.toString()
+				+ ": guard " + foe->getObjectName() + " (" + fmt0(double(foe->getArmyStrength()))
+				+ ") at step " + std::to_string(i + 1) + " of " + std::to_string(steps.size()));
 			steps.resize(i);
 			break;
 		}
@@ -618,6 +712,8 @@ bool Engine::execute(const std::vector<Option> & plan, const std::vector<Target>
 		hero = cb.getHero(ObjectInstanceID(o.hero));   // a lost fight removes it
 		if(!hero)
 		{
+			host_.logLine("   V2 LOST hero " + std::to_string(o.hero) + " going to " + t.tile.toString()
+				+ " (" + kindName(t.kind) + "), last seen at " + before.toString());
 			anyMoved = true;
 			++movesToday_;
 			continue;

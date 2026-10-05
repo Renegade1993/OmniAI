@@ -88,6 +88,9 @@ public:
 	virtual double pocketBehind(const int3 & guardPos, const CGHeroInstance * hero) = 0;
 	virtual double xpValue(const CGHeroInstance * hero, double xp) = 0;
 	virtual double horizonDays() = 0;
+	/// How badly a resource is needed: 1 when there is enough, more when short
+	/// or when a building waits on it.
+	virtual double resourceNeed(int resource) = 0;
 
 	// Threats.
 	virtual std::vector<FoeInfo> foes() = 0;
