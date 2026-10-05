@@ -327,11 +327,12 @@ double Engine::xpScale(const CGHeroInstance * hero) const
 
 double Engine::levelWorth(const CGHeroInstance * hero) const
 {
-	// One level, or one primary skill point, is about 5 percent of the army's
-	// fighting value for the rest of the game, and the army it multiplies
-	// grows (about threefold over the next weeks, measured on both sides), so
-	// it is priced against three times today's army, with a floor so an early
-	// level is not worth nothing.
+	// One level, or one primary skill point, is about 5 percent more damage
+	// dealt or 2.5 percent less taken for the rest of the game, on an army
+	// that grows (about threefold over the next weeks, measured on both
+	// sides): priced at 5 percent of three times today's army for the main
+	// hero (a quarter of that for the others), with a floor so an early level
+	// is not worth nothing.
 	return xpScale(hero) * 0.05 * std::max(4000.0, 3.0 * armyOf(hero));
 }
 
@@ -514,13 +515,25 @@ bool Engine::scoreOne(const CGHeroInstance * hero, const CPathsInfo * paths, con
 		}
 		case Target::Kind::OwnTown:
 		{
-			// Only the main hero collects the garrison, and only a pool worth
-			// the walk.
-			if(!isMain || hero->visitablePos() == t.tile)
+			// The main hero collects a garrison worth the walk; a support hero
+			// fetches one to carry to the main hero when the main hero is not
+			// coming for it itself (Gather takes it the rest of the way).
+			if(hero->visitablePos() == t.tile)
 				return false;
-			if(t.reward < std::max(800.0, 0.12 * army))
-				return false;
-			reward = s_.garrisonWorth * t.reward;
+			const CGHeroInstance * main = mainHero_ >= 0 ? cb.getHero(ObjectInstanceID(mainHero_)) : nullptr;
+			const double mainArmy = main ? armyOf(main) : army;
+			if(isMain)
+			{
+				if(t.reward < std::max(800.0, 0.12 * army))
+					return false;
+				reward = s_.garrisonWorth * t.reward;
+			}
+			else
+			{
+				if(t.reward < std::max(1500.0, 0.05 * mainArmy))
+					return false;
+				reward = s_.courierWorth * t.reward;
+			}
 			break;
 		}
 		case Target::Kind::Gather:
@@ -799,6 +812,13 @@ bool Engine::execute(const std::vector<Option> & plan, const std::vector<Target>
 		lastTile_[o.hero] = t.tile;
 		if(hero->visitablePos() == t.tile && t.kind == Target::Kind::Visit)
 			visited_[{o.hero, t.tile}] = day_;
+		if(hero->visitablePos() == t.tile && t.kind == Target::Kind::OwnTown && o.hero != mainHero_)
+			if(const auto * town = dynamic_cast<const CGTownInstance *>(cb.getObj(t.id, false)))
+			{
+				host_.logLine("   V2 COURIER " + hero->getNameTranslated() + " takes the garrison of "
+					+ town->getNameTranslated() + " (" + fmt0(double(town->getArmyStrength())) + ")");
+				host_.takeGarrison(town, hero);
+			}
 
 		if(t.kind == Target::Kind::Gather)
 		{

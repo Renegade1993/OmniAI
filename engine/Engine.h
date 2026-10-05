@@ -43,6 +43,9 @@ struct Settings
 	/// Share of a town's garrison that counts as gained when the main hero
 	/// collects it.
 	double garrisonWorth = 0.8;
+	/// The same for a support hero that fetches a garrison to carry it to the
+	/// main hero (it still has to walk it over).
+	double courierWorth = 0.5;
 	/// Army value of a hero kill on top of the army destroyed.
 	double heroKillBonus = 2500.0;
 	/// Share of the enemy army destroyed that counts as gained.
@@ -50,8 +53,8 @@ struct Settings
 	/// Experience and primary skills are worth this many times the legacy
 	/// price (5 percent of the army per level) to the main hero, and to the
 	/// others.
-	double xpScaleMain = 2.4;
-	double xpScaleSupport = 0.6;
+	double xpScaleMain = 1.0;
+	double xpScaleSupport = 0.25;
 	/// Caps on how much a short resource multiplies a mine's or pile's worth.
 	double needCap = 4.0;
 	double goldNeedCap = 3.0;

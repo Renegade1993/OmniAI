@@ -11806,7 +11806,9 @@ void OmniAI::recruitInAllTowns()
 			// with a loaded Deliver task would get its cargo dumped right
 			// back into the pool it collected. Keep it aboard.
 			const RegTask * run = assignedTask(buyer);
-			if(!run || run->kind != RegTask::Kind::Deliver)
+			// The v2 engine's couriers carry the garrison to the main hero
+			// (engine/Engine.cpp, COURIER), so nothing is put back here.
+			if(!engineV2_ && (!run || run->kind != RegTask::Kind::Deliver))
 				depositArmy(buyer, town);
 			continue;
 		}
@@ -12369,6 +12371,11 @@ std::vector<omniai::v2::TownThreat> OmniAI::threatenedTowns()
 void OmniAI::giveArmy(const CGHeroInstance * from, const CGHeroInstance * to)
 {
 	handOver(from, to);
+}
+
+void OmniAI::takeGarrison(const CGTownInstance * town, const CGHeroInstance * hero)
+{
+	collectGarrison(town, hero);
 }
 
 void OmniAI::setMainHero(int32_t heroId)
