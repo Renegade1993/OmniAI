@@ -62,7 +62,7 @@ struct Settings
 	/// Scores are net value to this power, per day of the hero's time. Below
 	/// 1 it favours many near jobs over one far, valuable one (Nullkiller
 	/// takes the nearest job that pays at all); 1 ranks by value per day.
-	double valueExponent = 0.8;
+	double valueExponent = 0.6;
 	/// Share of the value lying just beyond a visit (within `onwardRadius`
 	/// tiles of it and further from the hero) added to that visit's worth, so
 	/// a hero sweeps a cluster in one direction instead of hopping about it.
