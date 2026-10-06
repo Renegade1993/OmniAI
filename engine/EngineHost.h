@@ -55,6 +55,11 @@ struct TownThreat
 {
 	int32_t townId = -1;
 	double threat = 0.0;
+	/// The strongest enemy hero within 12 tiles would take the town from what
+	/// stands in it without the main hero.
+	bool danger = false;
+	/// With the main hero inside, the town would hold against that hero.
+	bool mainSaves = false;
 };
 
 class IEngineHost
