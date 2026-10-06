@@ -11153,11 +11153,16 @@ double OmniAI::fortGrowthValue(const CGTownInstance * town, const BuildingID & i
 	{
 		if(level >= int(t->creatures.size()) || t->creatures[level].empty())
 			continue;
-		if(!town->hasBuilt(BuildingID::getDwellingFromLevel(level, 0)))
-			continue;
+		// A dwelling not built yet counts at half: it comes inside the horizon
+		// and the walls multiply its growth from then on. Counting only built
+		// dwellings priced the line low while the town had two or three of
+		// them, and our Citadel came on day 15.5 and Castle on day 17 (medians,
+		// V2M1AG, 30 games) against Nullkiller's 11 and 13, so its week-3
+		// growth on day 15 came with the walls' bonus and ours did not.
+		const double built = town->hasBuilt(BuildingID::getDwellingFromLevel(level, 0)) ? 1.0 : 0.5;
 		const auto * cre = t->creatures[level][0].toCreature();
 		if(cre)
-			weekly += double(cre->getGrowth()) * double(std::max(0, cre->getAIValue()));
+			weekly += built * double(cre->getGrowth()) * double(std::max(0, cre->getAIValue()));
 	}
 	return 0.5 * weekly * WEEKS_AHEAD;
 }
