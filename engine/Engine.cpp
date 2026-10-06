@@ -1117,35 +1117,6 @@ std::vector<Option> Engine::scoreOptions(const std::vector<Target> & targets)
 					options.push_back(o);
 				}
 		}
-
-	// A hero already within reach of a stronger enemy hero we know of goes to
-	// a town of ours it reaches today: walls and garrison fight with it there.
-	// The rule against stopping in reach lets such a hero walk anywhere, and
-	// the main hero still lost its army defending 11 times in V2M1AQ's 30
-	// games, already in reach each time (map 13, day 31: 8 tiles off, reach 29).
-	for(const CGHeroInstance * hero : cb.getHeroesInfo())
-	{
-		if(!hero || hero->movementPointsRemaining() <= 0 || doneToday_.count(hero->id.getNum())
-			|| ourTowns.count(hero->visitablePos()) || !dangerousFor(hero, hero->visitablePos(), foes))
-			continue;
-		const auto shared = host_.paths(hero);
-		if(!shared)
-			continue;
-		for(size_t i = 0; i < targets.size(); ++i)
-		{
-			if(targets[i].kind != Target::Kind::OwnTown || !ourTowns.count(targets[i].tile))
-				continue;
-			const CGPathNode * node = shared->getPathInfo(targets[i].tile);
-			if(!node || !node->reachable() || node->turns > 0)
-				continue;
-			Option o;
-			o.hero = hero->id.getNum();
-			o.target = i;
-			o.days = std::clamp(1.0 - double(node->moveRemains) / double(std::max(1, hero->movementPointsLimit(true))), 0.0, 1.0);
-			o.score = 1e11 / (1.0 + o.days);   // under a defence recall, over every gain
-			options.push_back(o);
-		}
-	}
 	return options;
 }
 
@@ -1278,15 +1249,11 @@ bool Engine::execute(const std::vector<Option> & plan, const std::vector<Target>
 		if(t.kind != Target::Kind::EnemyHero)
 		{
 			const int3 stop = hero->convertToVisitablePos(steps.back());
-			bool ownTown = false, inTown = false;
+			bool ownTown = false;
 			for(const CGTownInstance * town : cb.getTownsInfo())
-				if(town)
-				{
-					ownTown = ownTown || town->visitablePos() == stop;
-					inTown = inTown || town->visitablePos() == hero->visitablePos();
-				}
-			// A hero in one of our towns is behind walls: leaving into reach counts.
-			if(!ownTown && dangerousFor(hero, stop, foes) && (inTown || !dangerousFor(hero, hero->visitablePos(), foes)))
+				if(town && town->visitablePos() == stop)
+					ownTown = true;
+			if(!ownTown && dangerousFor(hero, stop, foes) && !dangerousFor(hero, hero->visitablePos(), foes))
 			{
 				host_.logLine("   V2 DANGER " + hero->getNameTranslated() + " would stop at " + stop.toString()
 					+ " in reach of a stronger enemy hero; the walk to " + t.tile.toString() + " is dropped");
