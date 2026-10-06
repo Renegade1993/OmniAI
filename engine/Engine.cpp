@@ -764,12 +764,6 @@ bool Engine::scoreOne(const CGHeroInstance * hero, const CPathsInfo * paths, con
 		}
 		case Target::Kind::Gather:
 		{
-			// Only when the main hero is near: a support hero sent to a main
-			// hero further off chased it as it moved, 80 hero-days of walks
-			// dropped halfway in V2M1AC and AD (switch_trace.py), and it
-			// collected nothing on the way.
-			if(days > s_.gatherReachDays)
-				return false;
 			reward = t.reward;
 			break;
 		}

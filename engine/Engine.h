@@ -71,8 +71,6 @@ struct Settings
 	/// A garrison or courier job takes a hero off a job it has not reached
 	/// only at this many times that job's score.
 	double townSwitchMargin = 2.0;
-	/// A support hero walks its army to the main hero only within this many days of it.
-	double gatherReachDays = 1.5;
 	/// Passes per day, a bound.
 	int maxPasses = 40;
 	/// Heroes kept: the first `baseHeroes`, one more per town above the
