@@ -36,7 +36,7 @@ for pre in args:
     ends = []
     moved = still = tiles = 0
     for m in maps:
-        f = os.path.join(HERE, "runs", "%s%s_s5k_r01_decisions-red.log" % (pre, m))
+        f = os.path.join(HERE, "runs", "%s%s_%s_r01_decisions-red.log" % (pre, m, opts.get("seed", "s5k")))
         if not os.path.exists(f):
             continue
         games += 1
@@ -67,7 +67,7 @@ for pre in args:
         for mm in re.finditer(r"HEROES d(\d+) red (.*?) \|", t):
             d = int(mm.group(1))
             pos = {h.group(1): (int(h.group(2)), int(h.group(3)), int(h.group(4)))
-                   for h in re.finditer(r"(\d+):[^@]+@(\d+),(\d+),(\d+):\d+:\d+", mm.group(2))}
+                   for h in re.finditer(r"(\d+):[^@:]+@(\d+),(\d+),(\d+):\d+:\d+(?::\d+:\d+)?", mm.group(2))}
             if prev and prev[0] == d - 1 and d <= 42:
                 for hid, p in pos.items():
                     q = prev[1].get(hid)

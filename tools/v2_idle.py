@@ -20,7 +20,7 @@ for pre in args:
     cnt = collections.Counter()
     total = still = 0
     for m in maps:
-        f = os.path.join(HERE, "runs", "%s%s_s5k_r01_decisions-red.log" % (pre, m))
+        f = os.path.join(HERE, "runs", "%s%s_%s_r01_decisions-red.log" % (pre, m, opts.get("seed", "s5k")))
         if not os.path.exists(f):
             continue
         day = 0
@@ -35,7 +35,7 @@ for pre in args:
             mm = re.match(r"\s+HEROES d(\d+) red (.*?) \|", line)
             if mm:
                 heroes[int(mm.group(1))] = {h.group(2).strip(): (int(h.group(3)), int(h.group(4)), int(h.group(5)))
-                                            for h in re.finditer(r"(\d+):([^@]+)@(\d+),(\d+),(\d+):\d+:\d+", mm.group(2))}
+                                            for h in re.finditer(r"(\d+):([^@:]+)@(\d+),(\d+),(\d+):\d+:\d+(?::\d+:\d+)?", mm.group(2))}
                 continue
             mm = re.match(r"\s+V2 p\d+ (.+?)\*? (visit|fight|town|gather|explore|hunt|capture) ", line)
             if mm:
