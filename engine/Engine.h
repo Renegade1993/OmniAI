@@ -75,8 +75,8 @@ struct Settings
 	int maxPasses = 40;
 	/// Heroes kept: the first `baseHeroes`, one more per town above the
 	/// first, never more than `maxHeroes`.
-	int baseHeroes = 4;
-	int maxHeroes = 6;
+	int baseHeroes = 3;
+	int maxHeroes = 5;
 };
 
 struct Target
