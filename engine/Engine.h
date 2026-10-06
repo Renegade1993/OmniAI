@@ -76,7 +76,7 @@ struct Settings
 	/// Heroes kept: the first `baseHeroes`, one more per town above the
 	/// first, never more than `maxHeroes`.
 	int baseHeroes = 3;
-	int maxHeroes = 3;
+	int maxHeroes = 5;
 };
 
 struct Target
