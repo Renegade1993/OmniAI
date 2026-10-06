@@ -32,7 +32,7 @@ namespace omniai::v2
 struct Settings
 {
 	/// Highest share of a hero's army a voluntary fight may cost.
-	double lossBudget = 0.50;
+	double lossBudget = 0.35;
 	/// Score multiplier for a hero's previous target, so near-equal jobs do
 	/// not swap back and forth between passes.
 	double momentum = 1.4;
