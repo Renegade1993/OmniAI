@@ -226,6 +226,11 @@ private:
 	// dialog callback, decremented when answerQuery replies.
 	std::atomic<int> openQueries_{0};
 
+	// The exit a walk planned through a teleport (the visitable tile after the
+	// jump in its steps), by hero id; the teleport dialog answers with it.
+	std::mutex teleportPlanMutex_;
+	std::map<int, int3> teleportPlan_;
+
 	// steady_clock nanoseconds at which an EndTurn was first held back for a
 	// battle, 0 when nothing is being held. Held as a plain integer because
 	// atomic<time_point> buys nothing here.

@@ -10874,12 +10874,33 @@ void OmniAI::showTeleportDialog(const CGHeroInstance * hero, TeleportChannelID c
 	TTeleportExitsList exits, bool impassable, QueryID askID)
 {
 	openQueries_.fetch_add(1);
-	// No "decline" answer exists: 0 picks exits[0], any invalid index
-	// rolls a RANDOM exit (HeroMovementController.cpp:79). This handler
-	// should be unreachable anyway - pathfinding never routes through
-	// teleports - so prefer the deterministic first exit over a random
-	// one if it somehow fires.
-	const int answer = exits.empty() ? -1 : 0;
+	// No "decline" answer exists: an index picks exits[index], any invalid
+	// one makes the server pick at random among the passable exits other
+	// than this one (CGTeleport::getRandomExit). A two-way channel lists
+	// every exit, this one included, so the old answer 0 sent the hero to
+	// the monolith it stood on whenever that came first in the list: no
+	// jump, and the engine sent the next hero the next day (V2M1AQ map 13:
+	// 20 to 47 walks onto the start monolith a game, no hero through it).
+	// The exit the walk planned first, else the first other exit, else
+	// the server's pick.
+	int3 planned(-1, -1, -1);
+	if(hero)
+	{
+		std::lock_guard<std::mutex> lock(teleportPlanMutex_);
+		const auto it = teleportPlan_.find(hero->id.getNum());
+		if(it != teleportPlan_.end())
+		{
+			planned = it->second;
+			teleportPlan_.erase(it);
+		}
+	}
+	int answer = -1;
+	for(size_t i = 0; i < exits.size() && answer < 0; ++i)
+		if(exits[i].second == planned)
+			answer = int(i);
+	for(size_t i = 0; i < exits.size() && answer < 0; ++i)
+		if(!hero || exits[i].second != hero->visitablePos())
+			answer = int(i);
 	executeAsync("teleportDialog", [this, askID, answer]{ answerQuery(askID, answer); });
 }
 
@@ -12352,6 +12373,23 @@ bool OmniAI::move(const CGHeroInstance * hero, const std::vector<int3> & steps)
 			battlesOpen_.store(0);
 			blockade_[0].store(false);
 			blockade_[1].store(false);
+		}
+	}
+	// A jump in the steps (two consecutive tiles that are not neighbours) is
+	// a teleport the pathfinder planned; its far tile is the exit to answer.
+	{
+		std::lock_guard<std::mutex> lock(teleportPlanMutex_);
+		teleportPlan_.erase(hero->id.getNum());
+		int3 prev = hero->visitablePos();
+		for(const int3 & s : steps)
+		{
+			const int3 v = hero->convertToVisitablePos(s);
+			if(v.z != prev.z || std::max(std::abs(v.x - prev.x), std::abs(v.y - prev.y)) > 1)
+			{
+				teleportPlan_[hero->id.getNum()] = v;
+				break;
+			}
+			prev = v;
 		}
 	}
 	++movesDispatched_;
