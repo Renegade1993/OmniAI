@@ -158,34 +158,6 @@ void Engine::makeTurn()
 		+ " unmoved=" + std::to_string(idle) + " mpLeft=" + fmt0(100.0 * mpLeft / std::max(1.0, mpAll)) + "%"
 		+ " main=" + std::to_string(mainHero_) + " dens=" + fmt0(density_)
 		+ (left.str().empty() ? "" : " |" + left.str()));
-
-	// Where the main hero stands for the night against the nearest stronger
-	// enemy hero we know of: the main hero lost its army defending 140 times in
-	// 210 games of V2M1AG to AP, so a log shows whether the attacker was known.
-	if(const CGHeroInstance * main = mainHero_ >= 0 ? cb.getHero(ObjectInstanceID(mainHero_)) : nullptr)
-	{
-		const double ours = armyOf(main);
-		const int3 at = main->visitablePos();
-		const FoeInfo * near = nullptr;
-		int nearDist = 0;
-		const std::vector<FoeInfo> foes = host_.foes();
-		for(const FoeInfo & f : foes)
-		{
-			if(f.strength <= ours || f.pos.z != at.z || f.ageDays > 3)
-				continue;
-			const int d = chebyshev(f.pos, at);
-			if(!near || d < nearDist)
-			{
-				near = &f;
-				nearDist = d;
-			}
-		}
-		if(near && nearDist <= 3 * std::max(1, near->reach))
-			host_.logLine("   V2 EXPOSED " + main->getNameTranslated() + " (" + fmt0(ours) + ") at " + at.toString()
-				+ ": enemy hero " + std::to_string(near->id) + " (" + fmt0(near->strength) + ") seen "
-				+ std::to_string(near->ageDays) + " day(s) ago " + std::to_string(nearDist) + " tiles off, reach "
-				+ std::to_string(near->reach));
-	}
 }
 
 int Engine::chooseSecondarySkill(const CGHeroInstance * hero, const std::vector<SecondarySkill> & offered) const
@@ -1160,7 +1132,6 @@ std::vector<Option> Engine::assign(std::vector<Option> options, const std::vecto
 bool Engine::execute(const std::vector<Option> & plan, const std::vector<Target> & targets, int pass)
 {
 	CCallback & cb = host_.game();
-	const std::vector<FoeInfo> foes = host_.foes();
 	// Army joins the main hero before the main hero walks away from it.
 	std::vector<Option> order = plan;
 	std::stable_sort(order.begin(), order.end(), [&](const Option & a, const Option & b)
@@ -1241,25 +1212,6 @@ bool Engine::execute(const std::vector<Option> & plan, const std::vector<Target>
 		{
 			blocked_.insert({o.hero, t.tile});
 			continue;
-		}
-		// The job's tile passed the danger rule, but a walk of more than a day
-		// stops tonight somewhere else. A stop within reach of a stronger enemy
-		// hero we know of is not taken, unless the hero is in such reach already
-		// (then no walk is worse than staying) or the stop is one of our towns.
-		if(t.kind != Target::Kind::EnemyHero)
-		{
-			const int3 stop = hero->convertToVisitablePos(steps.back());
-			bool ownTown = false;
-			for(const CGTownInstance * town : cb.getTownsInfo())
-				if(town && town->visitablePos() == stop)
-					ownTown = true;
-			if(!ownTown && dangerousFor(hero, stop, foes) && !dangerousFor(hero, hero->visitablePos(), foes))
-			{
-				host_.logLine("   V2 DANGER " + hero->getNameTranslated() + " would stop at " + stop.toString()
-					+ " in reach of a stronger enemy hero; the walk to " + t.tile.toString() + " is dropped");
-				blocked_.insert({o.hero, t.tile});
-				continue;
-			}
 		}
 
 		const int3 before = hero->visitablePos();
