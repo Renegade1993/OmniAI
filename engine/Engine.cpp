@@ -347,16 +347,6 @@ std::vector<Target> Engine::proposeTargets()
 			t.reward = s_.gatherWorth * army;
 			t.name = "army to " + main->getNameTranslated();
 			out.push_back(t);
-			// The main hero may walk toward it too, so the two close on each other.
-			// The support hero walked at the main hero's tile, which moved every day:
-			// in V2M1AG (30 games) the chase was the largest cause of dropped jobs,
-			// 103 hero-days lost (switch_trace.py, 'gone, dropped gather').
-			Target m = t;
-			m.id = h->id;
-			m.tile = h->visitablePos();
-			m.onlyHero = main->id.getNum();
-			m.name = "army from " + h->getNameTranslated();
-			out.push_back(m);
 		}
 
 	proposeExplore(out, knownValue);
@@ -1263,27 +1253,20 @@ bool Engine::execute(const std::vector<Option> & plan, const std::vector<Target>
 
 		if(t.kind == Target::Kind::Gather)
 		{
-			// Either the support hero walked to the main hero or the main hero to
-			// it (t.id is the other one); the army goes to the main hero.
-			const CGHeroInstance * other = cb.getHero(t.id);
-			const bool mainWalked = o.hero == mainHero_;
-			const CGHeroInstance * from = mainWalked ? other : hero;
-			const CGHeroInstance * main = mainWalked ? hero : other;
-			if(from && main && main->visitablePos().z == from->visitablePos().z
-				&& chebyshev(main->visitablePos(), from->visitablePos()) <= 1)
+			const CGHeroInstance * main = cb.getHero(t.id);
+			if(main && main->visitablePos().z == hero->visitablePos().z
+				&& chebyshev(main->visitablePos(), hero->visitablePos()) <= 1)
 			{
-				const ObjectInstanceID fromId = from->id;
-				const double carried = armyOf(from);
-				host_.logLine("   V2 GATHER " + from->getNameTranslated() + " hands "
-					+ fmt0(carried) + " to " + main->getNameTranslated()
-					+ (mainWalked ? " (the main hero walked)" : ""));
-				host_.giveArmy(from, main);
-				const CGHeroInstance * after = cb.getHero(fromId);
+				const double carried = armyOf(hero);
+				host_.logLine("   V2 GATHER " + hero->getNameTranslated() + " hands "
+					+ fmt0(carried) + " to " + main->getNameTranslated());
+				host_.giveArmy(hero, main);
+				const CGHeroInstance * after = cb.getHero(ObjectInstanceID(o.hero));
 				if(after && armyOf(after) > 0.9 * carried)
 				{
 					host_.logLine("   V2 GATHER refused: " + after->getNameTranslated() + " still carries "
 						+ fmt0(armyOf(after)) + ", no gather for three days");
-					gatherFailed_[fromId.getNum()] = day_;
+					gatherFailed_[o.hero] = day_;
 				}
 			}
 		}
