@@ -12024,8 +12024,8 @@ void OmniAI::handOver(const CGHeroInstance * from, const CGHeroInstance * to)
 	// read slot counts the other had already changed, and a split computed
 	// from them sent a negative count that crashes the server and the client
 	// in RebalanceStacks (integer divide by zero, CStackInstance::setCount;
-	// lane 10's dump of October 7th, V2M1AGBSM10; likely the day-1 "map
-	// never started" voids too). The game state lock is let go while waiting,
+	// lane 10's dump of October 7th, V2M1AGBSM10, a game hung on day 1).
+	// The game state lock is let go while waiting,
 	// as in move(): the other hand-over's requests need it to be applied.
 	std::unique_lock<std::mutex> handOverLock(handOverMutex_, std::defer_lock);
 	if(!handOverLock.try_lock())
