@@ -799,11 +799,6 @@ bool Engine::scoreOne(const CGHeroInstance * hero, const CPathsInfo * paths, con
 		case Target::Kind::Explore:
 		{
 			reward = t.reward;
-			// A monolith or gate (the only explore targets that are objects) is
-			// often guarded, and the guard is priced like a visit's: V2M1AK map
-			// 07, two heroes walked to one behind Power Liches (58266) every day.
-			if(obj && !priceFight(host_.guardAt(t.tile, hero)))
-				return false;
 			break;
 		}
 		case Target::Kind::EnemyHero:
@@ -1157,8 +1152,7 @@ bool Engine::execute(const std::vector<Option> & plan, const std::vector<Target>
 		// step would fight has to pass the same loss budget, or the walk stops
 		// short of it.
 		const bool pricedEnd = t.kind == Target::Kind::Visit || t.kind == Target::Kind::Monster
-			|| t.kind == Target::Kind::EnemyHero || t.kind == Target::Kind::EnemyTown
-			|| (t.kind == Target::Kind::Explore && t.id.hasValue());
+			|| t.kind == Target::Kind::EnemyHero || t.kind == Target::Kind::EnemyTown;
 		for(size_t i = 0; i < steps.size(); ++i)
 		{
 			const int3 tile = hero->convertToVisitablePos(steps[i]);
