@@ -12475,18 +12475,11 @@ std::vector<omniai::v2::FoeInfo> OmniAI::foes()
 std::vector<omniai::v2::TownThreat> OmniAI::threatenedTowns()
 {
 	std::vector<omniai::v2::TownThreat> out;
-	const CGHeroInstance * main = fieldHeroId_ >= 0 && cb ? cb->getHero(ObjectInstanceID(fieldHeroId_)) : nullptr;
 	for(const auto & kv : threatenedTowns_)
 	{
 		omniai::v2::TownThreat t;
 		t.townId = kv.first;
 		t.threat = kv.second;
-		const auto * town = cb ? dynamic_cast<const CGTownInstance *>(cb->getObj(ObjectInstanceID(kv.first), false)) : nullptr;
-		if(const CGHeroInstance * foe = town ? strongestThreatNear(town) : nullptr)
-		{
-			t.danger = !defenseHolds(nullptr, town, foe, main);
-			t.mainSaves = main && defenseHolds(main, town, foe);
-		}
 		out.push_back(t);
 	}
 	return out;

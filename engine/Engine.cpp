@@ -877,15 +877,11 @@ std::vector<Option> Engine::scoreOptions(const std::vector<Target> & targets)
 	// The main hero standing in a threatened town stays there: its army, the
 	// garrison it collected on arrival and the walls fight together. Walking
 	// out to the next prize is how map 05's only town fell on day 28 (V2M1D).
-	// Only when an enemy hero near enough to strike would take the town without
-	// it, and would not with it (the same rule as the recall below).
 	const std::vector<TownThreat> threats = host_.threatenedTowns();
 	if(mainHero_ >= 0 && !doneToday_.count(mainHero_))
 		if(const CGHeroInstance * main = cb.getHero(ObjectInstanceID(mainHero_)))
 			for(const TownThreat & threat : threats)
-				if(!threat.danger || !threat.mainSaves)
-					continue;
-				else if(const auto * town = dynamic_cast<const CGTownInstance *>(cb.getObj(ObjectInstanceID(threat.townId), false)))
+				if(const auto * town = dynamic_cast<const CGTownInstance *>(cb.getObj(ObjectInstanceID(threat.townId), false)))
 					if(town->visitablePos() == main->visitablePos())
 					{
 						doneToday_.insert(mainHero_);
@@ -1038,25 +1034,16 @@ std::vector<Option> Engine::scoreOptions(const std::vector<Target> & targets)
 	// 04, days 60-61: Kanan, then Silverspire 78 tiles away; 36 recalls
 	// dropped halfway cost 41 hero-days). Among new threats the nearest town
 	// wins.
-	// A recall is only for a town an enemy hero within striking range would
-	// take without the main hero and would not take with it, and only when the
-	// main hero gets there by tomorrow. In V2M1AG (30 games) the recall and the
-	// hold took 239 main-hero days, the early warnings of a hero seen days away
-	// most of them; in 68 of its 72 recalls no enemy hero came within 3 tiles
-	// of the town in the recall or the five days after, and in the other four
-	// the town fell anyway (recall_check.py).
 	const CGHeroInstance * main = mainHero_ >= 0 ? cb.getHero(ObjectInstanceID(mainHero_)) : nullptr;
 	bool recallStands = false;
 	for(const TownThreat & threat : threats)
-		if(threat.townId == recallTown_ && threat.danger && threat.mainSaves)
+		if(threat.townId == recallTown_)
 			recallStands = true;
 	if(!recallStands)
 		recallTown_ = -1;
 	if(main && main->movementPointsRemaining() > 0 && !doneToday_.count(mainHero_))
 		for(const TownThreat & threat : threats)
 		{
-			if(!threat.danger || !threat.mainSaves)
-				continue;
 			if(recallStands && threat.townId != recallTown_)
 				continue;
 			const auto * town = dynamic_cast<const CGTownInstance *>(cb.getObj(ObjectInstanceID(threat.townId), false));
@@ -1068,7 +1055,7 @@ std::vector<Option> Engine::scoreOptions(const std::vector<Target> & targets)
 				{
 					const auto shared = host_.paths(main);
 					const CGPathNode * node = shared ? shared->getPathInfo(town->visitablePos()) : nullptr;
-					if(!node || !node->reachable() || node->turns > 1)
+					if(!node || !node->reachable())
 						continue;
 					Option o;
 					o.hero = main->id.getNum();
