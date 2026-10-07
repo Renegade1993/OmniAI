@@ -231,6 +231,10 @@ private:
 	std::mutex teleportPlanMutex_;
 	std::map<int, int3> teleportPlan_;
 
+	// handOver runs one at a time (the engine's giveArmy and the hero
+	// exchange handler raced on October 7th; see handOver).
+	std::mutex handOverMutex_;
+
 	// steady_clock nanoseconds at which an EndTurn was first held back for a
 	// battle, 0 when nothing is being held. Held as a plain integer because
 	// atomic<time_point> buys nothing here.

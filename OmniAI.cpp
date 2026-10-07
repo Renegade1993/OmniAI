@@ -12018,6 +12018,31 @@ void OmniAI::handOver(const CGHeroInstance * from, const CGHeroInstance * to)
 	if(!cb || !from || !to || from == to)
 		return;
 
+	// One hand-over at a time. A gather walk that ends on the main hero opens
+	// the server's hero exchange, whose handler (heroExchangeStarted, on a
+	// worker) hands over while the engine's giveArmy hands over too; each
+	// read slot counts the other had already changed, and a split computed
+	// from them sent a negative count that crashes the server and the client
+	// in RebalanceStacks (integer divide by zero, CStackInstance::setCount;
+	// lane 10's dump of October 7th, V2M1AGBSM10; likely the day-1 "map
+	// never started" voids too). The game state lock is let go while waiting,
+	// as in move(): the other hand-over's requests need it to be applied.
+	std::unique_lock<std::mutex> handOverLock(handOverMutex_, std::defer_lock);
+	if(!handOverLock.try_lock())
+	{
+		if(workerHoldsGameState)
+		{
+			auto unlock = vstd::makeUnlockSharedGuard(CGameState::mutex);
+			handOverLock.lock();
+		}
+		else
+			handOverLock.lock();
+	}
+	from = cb->getHero(from->id);
+	to = cb->getHero(to->id);
+	if(!from || !to)
+		return;
+
 	auto stackValue = [](const CStackInstance * s) -> uint64_t
 	{
 		const auto * c = (s && s->getType()) ? s->getCreature() : nullptr;
