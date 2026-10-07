@@ -11195,6 +11195,26 @@ void OmniAI::upgradeArmy(const CArmedInstance * army)
 	// Griffin to Royal Griffin +97 for 40. We had never upgraded a stack.
 	if(!cb || !army)
 		return;
+	// One upgrade pass at a time, as handOver: heroVisitsTown (a worker) and
+	// recruitInAllTowns upgraded the same army at once on October 7th
+	// (V2M1AX2SM14, lane 7, day 47: "UPGRADE 9 Earth Elementals to Air
+	// Elementals" twice), the second request named a stack the first had
+	// already changed, and the server crashed (access violation).
+	std::unique_lock<std::mutex> upgradeLock(upgradeMutex_, std::defer_lock);
+	if(!upgradeLock.try_lock())
+	{
+		if(workerHoldsGameState)
+		{
+			auto unlock = vstd::makeUnlockSharedGuard(CGameState::mutex);
+			upgradeLock.lock();
+		}
+		else
+			upgradeLock.lock();
+	}
+	const ObjectInstanceID armyId = army->id;
+	army = dynamic_cast<const CArmedInstance *>(cb->getObj(armyId, false));
+	if(!army)
+		return;
 	for(int i = 0; i < GameConstants::ARMY_SIZE; ++i)
 	{
 		const CStackInstance * s = army->getStackPtr(SlotID(i));
