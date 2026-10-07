@@ -1158,6 +1158,7 @@ bool Engine::execute(const std::vector<Option> & plan, const std::vector<Target>
 
 		const int3 before = hero->visitablePos();
 		const int mpBefore = hero->movementPointsRemaining();
+		const double armyBefore = armyOf(hero);
 		host_.logLine("   V2 p" + std::to_string(pass) + " " + hero->getNameTranslated()
 			+ (o.hero == mainHero_ ? "*" : "") + " " + kindName(t.kind) + " " + t.name
 			+ " at " + t.tile.toString() + " r=" + fmt0(o.reward) + " loss=" + fmt0(o.loss)
@@ -1206,20 +1207,40 @@ bool Engine::execute(const std::vector<Option> & plan, const std::vector<Target>
 		if(t.kind == Target::Kind::Gather)
 		{
 			const CGHeroInstance * main = cb.getHero(t.id);
+			// The server moves stacks between two heroes only while the exchange
+			// a hero opens by stepping onto the other is open (or in one town):
+			// CGameHandler::isAllowedExchange. A walk cut short beside the main
+			// hero opened nothing, and the old giveArmy here was refused stack
+			// by stack; the carrier was then barred for three days. And the army
+			// "carried" was read after the walk, when the exchange had already
+			// taken it, so a hand-over that worked was often logged as refused.
+			// V2M1AG/AU/AW: 299 to 332 of 616 to 701 gathers "refused" in 30 games.
+			// Now: what the carrier had before the walk against what it has
+			// after; beside the main hero with movement left, it steps onto it;
+			// with none left it tries again tomorrow.
 			if(main && main->visitablePos().z == hero->visitablePos().z
 				&& chebyshev(main->visitablePos(), hero->visitablePos()) <= 1)
 			{
-				const double carried = armyOf(hero);
-				host_.logLine("   V2 GATHER " + hero->getNameTranslated() + " hands "
-					+ fmt0(carried) + " to " + main->getNameTranslated());
-				host_.giveArmy(hero, main);
-				const CGHeroInstance * after = cb.getHero(ObjectInstanceID(o.hero));
-				if(after && armyOf(after) > 0.9 * carried)
+				// The walk's last step onto the main hero opens the exchange.
+				bool exchanged = hero->convertToVisitablePos(steps.back()) == main->visitablePos();
+				if(armyOf(hero) > 0.9 * armyBefore && hero->movementPointsRemaining() > 0)
 				{
-					host_.logLine("   V2 GATHER refused: " + after->getNameTranslated() + " still carries "
-						+ fmt0(armyOf(after)) + ", no gather for three days");
+					host_.move(hero, {hero->convertFromVisitablePos(main->visitablePos())});
+					hero = cb.getHero(ObjectInstanceID(o.hero));
+					exchanged = true;
+				}
+				if(hero && armyOf(hero) <= 0.9 * armyBefore)
+					host_.logLine("   V2 GATHER " + hero->getNameTranslated() + " handed "
+						+ fmt0(armyBefore - armyOf(hero)) + " of " + fmt0(armyBefore) + " to " + main->getNameTranslated());
+				else if(hero && exchanged)
+				{
+					host_.logLine("   V2 GATHER refused: " + hero->getNameTranslated() + " still carries "
+						+ fmt0(armyOf(hero)) + " after the exchange, no gather for three days");
 					gatherFailed_[o.hero] = day_;
 				}
+				else if(hero)
+					host_.logLine("   V2 GATHER waits: " + hero->getNameTranslated() + " beside "
+						+ main->getNameTranslated() + " with no movement left");
 			}
 		}
 	}
