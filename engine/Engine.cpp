@@ -442,35 +442,6 @@ void Engine::proposeExplore(std::vector<Target> & out, double knownValue)
 				out.push_back(t);
 			}
 	}
-
-	// A two-way monolith or a subterranean gate whose other end nobody of ours
-	// has seen. The channel reads impassable until then, so no path runs
-	// through it and the ground beyond is in no frontier: stepping in is the
-	// only way to find it. Worth a full sight radius of unseen ground. In
-	// V2M1AG and AI (60 games) Nullkiller's heroes made 48 one-day jumps of 30
-	// tiles or more on the three maps with monoliths, ours 1.
-	const int sightArea = (2 * R + 1) * (2 * R + 1);
-	for(const CGObjectInstance * obj : cb.getAllVisitableObjs())
-	{
-		if(!obj || (obj->ID != Obj::MONOLITH_TWO_WAY && obj->ID != Obj::SUBTERRANEAN_GATE))
-			continue;
-		const auto * port = dynamic_cast<const CGTeleport *>(obj);
-		if(!port || !port->isEntrance() || !cb.isVisible(obj->visitablePos()))
-			continue;
-		bool otherEndSeen = false;
-		for(const ObjectInstanceID & exit : cb.getTeleportChannelExits(port->channel, host_.me()))
-			if(exit != obj->id)
-				otherEndSeen = true;
-		if(otherEndSeen)
-			continue;
-		Target t;
-		t.kind = Target::Kind::Explore;
-		t.id = obj->id;
-		t.tile = obj->visitablePos();
-		t.reward = density * double(sightArea);
-		t.name = "unseen ground through " + obj->getObjectName();
-		out.push_back(t);
-	}
 }
 
 double Engine::xpScale(const CGHeroInstance * hero) const
