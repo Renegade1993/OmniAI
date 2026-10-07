@@ -3617,7 +3617,12 @@ double OmniAI::valueHorizonDays() const
 		return 28.0;
 	const int3 size = cb->getMapSize();
 	const double area = double(size.x) * double(size.y) * double(std::max(1, size.z));
-	return std::clamp(28.0 * std::sqrt(area / (36.0 * 36.0)), 28.0, 112.0);
+	// Capped at 56 days (October 7th, V2M1BA): on the 144x144 duel maps the
+	// old cap of 112 priced a Capitol at x16.7 its cost and the level-7
+	// dwelling at x2.3, so ours came on days 34-35 against Nullkiller's 21-27,
+	// while our purse held 17698 gold unspent on day 28 and 13418 on day 42
+	// (medians, V2M1AG): income was not what bound the army.
+	return std::clamp(28.0 * std::sqrt(area / (36.0 * 36.0)), 28.0, 56.0);
 }
 
 bool OmniAI::contactSoon() const
