@@ -101,8 +101,6 @@ public:
 
 	// Army handling.
 	virtual void giveArmy(const CGHeroInstance * from, const CGHeroInstance * to) = 0;
-	/// The army value a hand-over from one hero to another would add to the receiver.
-	virtual double handOverGain(const CGHeroInstance * from, const CGHeroInstance * to) const = 0;
 	/// Moves a town's garrison onto a hero standing in it.
 	virtual void takeGarrison(const CGTownInstance * town, const CGHeroInstance * hero) = 0;
 	/// Steps a hero out of a town's garrison slot into its empty doorway.

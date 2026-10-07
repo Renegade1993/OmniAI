@@ -75,7 +75,6 @@ public:
 	std::vector<omniai::v2::FoeInfo> foes() override;
 	std::vector<omniai::v2::TownThreat> threatenedTowns() override;
 	void giveArmy(const CGHeroInstance * from, const CGHeroInstance * to) override;
-	double handOverGain(const CGHeroInstance * from, const CGHeroInstance * to) const override;
 	void takeGarrison(const CGTownInstance * town, const CGHeroInstance * hero) override;
 	void leaveGarrison(const CGTownInstance * town) override;
 	void setMainHero(int32_t heroId) override;

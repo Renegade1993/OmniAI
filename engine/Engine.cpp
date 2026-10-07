@@ -328,10 +328,7 @@ std::vector<Target> Engine::proposeTargets()
 		{
 			if(!h || h == main)
 				continue;
-			// What the hand-over would add to the main hero, not the whole army
-			// carried: half the gathers of a 30-game smoke moved nothing
-			// (V2M1AX: 261 refused of 575 exchanges).
-			const double army = host_.handOverGain(h, main);
+			const double army = armyOf(h);
 			if(army < std::max(300.0, 0.08 * armyOf(main)))
 				continue;
 			// A hand-over that moved nothing (the main hero's seven slots hold
