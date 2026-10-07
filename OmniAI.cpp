@@ -11344,8 +11344,22 @@ void OmniAI::buildInTown(const CGTownInstance * town)
 		BuildingID target = BuildingID::NONE, next = BuildingID::NONE;
 		double value = 0, cost = 0, roi = 0;
 		bool nextAllowed = false, income = false;
+		double score = 0;
 	};
 	Plan best;
+	// Gold beyond what every creature on sale in our towns would cost now.
+	double spareGold = double(gold);
+	for(const CGTownInstance * own : cb->getTownsInfo())
+		if(own && own->tempOwner == playerID)
+			for(const auto & level : own->creatures)
+			{
+				if(level.first == 0 || level.second.empty())
+					continue;
+				const auto * cre = level.second.back().toCreature();
+				if(cre)
+					spareGold -= double(level.first) * double(cre->getFullRecruitCost()[EGameResID::GOLD]);
+			}
+	spareGold = std::max(0.0, spareGold);
 	int lastBlocked = -1;
 	// BUILDSCAN, once a week per town: every candidate path with its worth,
 	// cost and ratio, the ones dropped as "worth more as soldiers" included.
@@ -11447,8 +11461,15 @@ void OmniAI::buildInTown(const CGTownInstance * town)
 		if(next == BuildingID::NONE)
 			continue;
 		const double roi = value / gc;
-		if(roi > best.roi)
-			best = { id, next, value, gc, roi, nextAllowed, income };
+		// Ranked by worth over the larger of the path's cost and the gold we
+		// hold beyond this week's recruits: with spare gold a town's one build
+		// a day is what is scarce, so a path the purse already covers is ranked
+		// by its worth. Worth per gold alone put our level-7 dwelling on day 34
+		// against Nullkiller's 24 (medians, V2M1AG) while our purse held 17698
+		// gold unspent on day 28 (x2.3 against x26 for a level-3 dwelling).
+		const double score = value / std::max(gc, spareGold);
+		if(score > best.score)
+			best = { id, next, value, gc, roi, nextAllowed, income, score };
 	}
 
 	{
