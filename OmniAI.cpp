@@ -12233,6 +12233,75 @@ bool OmniAI::wouldHandOver(const CGHeroInstance * from, const CGHeroInstance * t
 	return false;
 }
 
+double OmniAI::handOverGain(const CGHeroInstance * from, const CGHeroInstance * to) const
+{
+	// handOver's rules, counted instead of carried out: the army value the
+	// receiver would gain. A stack of a type it holds joins; another takes a
+	// free slot while there is one; the rest trade slots with its weakest
+	// stacks only where they are worth more. The fastest stack stays on the
+	// carrier, less one creature into a fighter, and a lone stack goes less
+	// one creature. October 7th: a gather was priced at the whole army carried,
+	// and half the gathers of a game moved nothing (the receiver's seven slots
+	// held other creatures, all stronger).
+	if(!from || !to || from == to)
+		return 0.0;
+	struct S { SlotID slot; double value; CreatureID type; int count; };
+	std::vector<S> carried;
+	SlotID keep;
+	int keepSpeed = -1;
+	for(const auto & e : from->Slots())
+	{
+		if(!e.second || !e.second->getCreature())
+			continue;
+		carried.push_back({e.first, double(e.second->getPower()), e.second->getCreature()->getId(), int(e.second->getCount())});
+		if(e.second->getCreature()->getBaseSpeed() > keepSpeed)
+		{
+			keepSpeed = e.second->getCreature()->getBaseSpeed();
+			keep = e.first;
+		}
+	}
+	const bool lone = carried.size() == 1;
+	const bool toFighter = to->id.getNum() == fieldHeroId_ || to->id.getNum() == secondFieldId_;
+	std::set<CreatureID> types;
+	std::vector<double> theirs;
+	int freeSlots = GameConstants::ARMY_SIZE;
+	for(const auto & e : to->Slots())
+		if(e.second && e.second->getCreature())
+		{
+			types.insert(e.second->getCreature()->getId());
+			theirs.push_back(double(e.second->getPower()));
+			--freeSlots;
+		}
+	std::sort(carried.begin(), carried.end(), [](const S & a, const S & b){ return a.value > b.value; });
+	double gain = 0.0;
+	std::vector<double> swaps;
+	for(const S & s : carried)
+	{
+		double v = s.value;
+		if(s.slot == keep && (lone || toFighter))
+			v = s.count > 1 ? v * double(s.count - 1) / double(s.count) : 0.0;
+		else if(s.slot == keep)
+			continue;
+		if(v <= 0.0)
+			continue;
+		if(types.count(s.type))
+			gain += v;
+		else if(freeSlots > 0)
+		{
+			--freeSlots;
+			types.insert(s.type);
+			gain += v;
+		}
+		else
+			swaps.push_back(v);
+	}
+	std::sort(theirs.begin(), theirs.end());
+	std::sort(swaps.begin(), swaps.end(), [](double a, double b){ return a > b; });
+	for(size_t i = 0; i < swaps.size() && i < theirs.size() && swaps[i] > theirs[i]; ++i)
+		gain += swaps[i] - theirs[i];
+	return gain;
+}
+
 bool OmniAI::moveOneStack(const CArmedInstance * src, const CArmedInstance * dst,
 	SlotID slot, bool keepOne)
 {
