@@ -795,7 +795,17 @@ bool Engine::scoreOne(const CGHeroInstance * hero, const CPathsInfo * paths, con
 			if(cb.getTownsInfo().empty())
 				reward = std::max(reward, 10.0 * armyOf(hero)) + 100000.0;
 			const auto * town = dynamic_cast<const CArmedInstance *>(obj);
-			if(town && town->getArmyStrength() > 0)
+			// A hero inside defends the town even when its garrison is empty, and
+			// the garrison count alone did not see it: 43 attacks on an empty
+			// garrison with a hero inside in AG, AX, BE and BF (475 games), 22
+			// lost, most of them the whole main army (V2M1AXRSM13 day 17: 23229
+			// against Lysander, who lost 80). estimate() is estimateSiege, which
+			// counts the garrison hero and a hostile visitor.
+			bool heroInside = false;
+			if(const auto * tw = dynamic_cast<const CGTownInstance *>(obj))
+				heroInside = tw->getGarrisonHero()
+					|| (tw->getVisitingHero() && tw->getVisitingHero()->tempOwner != hero->tempOwner);
+			if(town && (town->getArmyStrength() > 0 || heroInside))
 			{
 				const FightEstimate e = host_.estimate(hero, town);
 				if(!e.win || e.kept < 1.0 - s_.lossBudget)
