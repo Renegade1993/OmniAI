@@ -323,6 +323,46 @@ std::vector<Target> Engine::proposeTargets()
 	}
 
 	// Gather: each support hero may walk its army to the main hero.
+	// A hand-over is also worth the fights it opens: the best guard within two
+	// days of the main hero that it cannot take alone and could with the
+	// support armies (1.5 times the guard), shared by army. Priced at 0.6 of
+	// the army alone it lost to every frontier: V2M1BGBSM15 kept 7562 of
+	// 13016 on two exploring support heroes for 35 days, no hand-over, all
+	// three heroes level 1 on day 12, while Nullkiller's main held about 83% of its
+	// army on day 7 by medians (all maps, days 7-21: its best hero 10545/14503/30135,
+	// ours 6825/9904/16856, the totals within 15%).
+	double supportSum = 0.0, blockedPrize = 0.0;
+	if(main)
+	{
+		for(const CGHeroInstance * h : cb.getHeroesInfo())
+			if(h && h != main && armyOf(h) >= std::max(300.0, 0.08 * armyOf(main)))
+				supportSum += armyOf(h);
+		const auto mainPaths = supportSum > 0.0 ? host_.paths(main) : nullptr;
+		if(mainPaths)
+		{
+			const double combined = armyOf(main) + supportSum;
+			for(const Target & m : out)
+			{
+				if(m.kind != Target::Kind::Monster)
+					continue;
+				const CGPathNode * node = mainPaths->getPathInfo(m.tile);
+				if(!node || !node->reachable() || node->turns > 2)
+					continue;
+				const auto * armed = dynamic_cast<const CArmedInstance *>(cb.getObj(m.id, false));
+				if(!armed || armed->getArmyStrength() <= 0 || combined < 1.5 * double(armed->getArmyStrength()))
+					continue;
+				const FightEstimate e = host_.estimate(main, armed);
+				if(e.win && e.kept >= 1.0 - s_.lossBudget)
+					continue;   // the main hero takes it alone
+				double xp = 0.0;
+				for(const auto & slot : armed->Slots())
+					if(slot.second && slot.second->getCreature())
+						xp += double(slot.second->getCount()) * double(slot.second->getCreature()->getMaxHealth());
+				blockedPrize = std::max(blockedPrize, xpWorth(main, xp) + host_.pocketBehind(m.tile, main)
+					+ gateValue(mainPaths.get(), m.tile));
+			}
+		}
+	}
 	if(main)
 		for(const CGHeroInstance * h : cb.getHeroesInfo())
 		{
@@ -344,7 +384,7 @@ std::vector<Target> Engine::proposeTargets()
 			t.id = main->id;
 			t.tile = main->visitablePos();
 			t.onlyHero = h->id.getNum();
-			t.reward = s_.gatherWorth * army;
+			t.reward = s_.gatherWorth * army + (supportSum > 0.0 ? blockedPrize * army / supportSum : 0.0);
 			t.name = "army to " + main->getNameTranslated();
 			out.push_back(t);
 		}
