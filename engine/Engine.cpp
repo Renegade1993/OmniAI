@@ -223,7 +223,22 @@ void Engine::hireToCap()
 	for(const CGTownInstance * t : cb.getTownsInfo())
 		if(t)
 			++towns;
-	const int cap = std::min(s_.maxHeroes, s_.baseHeroes + std::max(0, towns - 1));
+	int cap = std::min(s_.maxHeroes, s_.baseHeroes + std::max(0, towns - 1));
+	// Heroes past the base only while the main hero already holds most of the
+	// field army: another hero takes a slice the main hero would have fought
+	// with. Map 15 under BI (October 8th): 5 heroes on days 21-28 against
+	// Nullkiller's 3, the main hero 7439 of 22624 with attack and defence 6/4
+	// against Nullkiller's 15/12 (OmniAI\! LLM Files\2026-10-08_Map15-army-gap-note.md).
+	if(cap > s_.baseHeroes)
+	{
+		const CGHeroInstance * main = mainHero_ >= 0 ? cb.getHero(ObjectInstanceID(mainHero_)) : nullptr;
+		double field = 0.0;
+		for(const CGHeroInstance * h : cb.getHeroesInfo())
+			if(h)
+				field += armyOf(h);
+		if(!main || armyOf(main) < 0.75 * field)
+			cap = s_.baseHeroes;
+	}
 	for(int i = 0; i < 3 && int(cb.getHeroesInfo().size()) < cap; ++i)
 		if(!host_.hireOne())
 			break;
