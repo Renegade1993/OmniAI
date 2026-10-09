@@ -4,7 +4,8 @@ seed. October 6th (30-game medians and win counts could not tell any of the day'
 OLD and NEW are build letters as in the smoke tags (AG, AM, AN): the games V2M1<X>SM, V2M1<X>2SM and V2M1<X>3SM. For each
 day: the army share of Nullkiller's (TRUTH army, red over blue) of each game, the per-game log ratio NEW/OLD where both
 games reached that day, its mean as a factor with a 90% band (t, 1.7 standard errors), and how many games NEW led.
-A game that ended before the day (a loss) counts as share 0.01, so a loss weighs against its build. Voids (no TRUTH
+A game Nullkiller won before the day counts as share 0.01, so a loss weighs against its build; a game cut short
+undecided is left out of the days it did not reach (October 8th; before that it counted as a loss). Voids (no TRUTH
 line on day 7) are left out of both sides."""
 import io
 import math
@@ -37,13 +38,21 @@ def shares(build, sfx, m):
     if not re.search(r"TRUTH d7 ", t):
         return None
     last = max([int(x) for x in re.findall(r"^DAY (\d+)", t, re.M)] or [0])
+    # October 8th: only a game Nullkiller won counts 0.01 after its end; a game cut short undecided (the 3600 s cap, a
+    # hung client killed) is left out of the days it did not reach, as m1_gate.py does.
+    of = os.path.join(HERE, "runs", "V2M1%s%sSM%s.out" % (build, sfx, m))
+    rm = re.search(r"run \d+ \((?:red|blue)\): day \d+\s+(winner \S+|undecided)",
+                   io.open(of, encoding="utf-8", errors="replace").read()) if os.path.exists(of) else None
+    lost = bool(rm and rm.group(1).startswith("winner") and "OmniAI" not in rm.group(1))
+    if lost and opts.get("losses") == "out":
+        return None  # --losses=out (October 8th): a lost game and its pair are left out, to see the rest apart from losses
     out = {}
     for d in days:
         o = re.search(r"TRUTH d%d [a-z]+\* [^\n]*" % d, t)
         b = re.search(r"TRUTH d%d [a-z]+ [^*][^\n]*" % d, t)
         if o and b and army(b.group(0)):
             out[d] = max(0.01, army(o.group(0)) / army(b.group(0)))
-        elif last < d:
+        elif last < d and lost:
             out[d] = 0.01
     return out
 
