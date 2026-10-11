@@ -39,14 +39,17 @@ struct Settings
 	/// Days beyond which a job is not considered.
 	double horizonDays = 14.0;
 	/// Share of a support hero's army that counts as gained when it reaches
-	/// the main hero.
-	double gatherWorth = 0.6;
+	/// the main hero: all of it, as Nullkiller 1 counts a delivery's whole
+	/// reinforcement (HeroExchangeEvaluator). At 0.6, with scores taken to the
+	/// power 0.6, a 4,678 carrier lost to a 68-tile frontier by a factor of 2.2
+	/// (item D bug 8).
+	double gatherWorth = 1.0;
 	/// Share of a town's garrison that counts as gained when the main hero
 	/// collects it.
 	double garrisonWorth = 0.8;
 	/// The same for a support hero that fetches a garrison to carry it to the
-	/// main hero (it still has to walk it over).
-	double courierWorth = 0.5;
+	/// main hero; the walk over is a gather job of its own and is priced there.
+	double courierWorth = 1.0;
 	/// Army value of a hero kill on top of the army destroyed.
 	double heroKillBonus = 2500.0;
 	/// Share of the enemy army destroyed that counts as gained.
