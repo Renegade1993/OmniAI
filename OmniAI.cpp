@@ -11245,6 +11245,125 @@ int OmniAI::surplusGold() const
 	return cb->getResourceAmount(EGameResID::GOLD) - need;
 }
 
+// sw_BY and sw_BW (v2-exp-BW d248526), lifted verbatim.
+double OmniAI::goldPressure() const
+{
+	// (gold held + gold for the stock on sale + gold of the next income steps)
+	// / (1 + 2 x free gold + 7 x daily gold income): BuildAnalyzer::update,
+	// Analyzers/BuildAnalyzer.cpp 145-170 (Nullkiller 1, 1.7.5).
+	if(!cb)
+		return 0.0;
+	double held = double(buildReserveTotal());
+	double stock = 0.0, nextIncome = 0.0, income = 0.0;
+	for(const CGTownInstance * town : cb->getTownsInfo())
+	{
+		if(!town || town->tempOwner != playerID)
+			continue;
+		income += double(town->dailyIncome()[EGameResID::GOLD]);
+		for(const auto & level : town->creatures)
+			if(level.first > 0 && !level.second.empty())
+				if(const auto * cre = level.second.back().toCreature())
+					stock += double(level.first) * double(cre->getFullRecruitCost()[EGameResID::GOLD]);
+		const auto * t = town->getTown();
+		if(!t)
+			continue;
+		for(const BuildingID hall : { BuildingID::TOWN_HALL, BuildingID::CITY_HALL, BuildingID::CAPITOL })
+			if(t->buildings.count(hall) && !town->hasBuilt(hall))
+			{
+				nextIncome += double(t->buildings.at(hall)->resources[EGameResID::GOLD]);
+				break;
+			}
+	}
+	for(const CGObjectInstance * obj : cb->getMyObjects())
+		if(const auto * mine = dynamic_cast<const CGMine *>(obj))
+			income += double(mine->dailyIncome()[EGameResID::GOLD]);
+	const double freeGold = std::max(0.0, double(cb->getResourceAmount(EGameResID::GOLD)) - held);
+	return (held + stock + nextIncome) / (1.0 + 2.0 * freeGold + 7.0 * income);
+}
+
+double OmniAI::buildScore(const CGTownInstance * town, const BuildingID & target,
+	const TResources & pathCost, int steps, double pressure) const
+{
+	// Nullkiller 1's numbers (Engine/PriorityEvaluator.cpp 1160-1260 and
+	// 1565-1610), in its own units: gold reward 7 x daily income / 2; a base
+	// dwelling's army reward 1.5 x a week's growth (doubled under a Castle,
+	// x1.5 under a Citadel), an upgrade's the week's gain; both multiplied by
+	// the summed town level of our towns of that faction; strategic value x
+	// 1000 for dwellings and, under gold pressure, for income; then +1000,
+	// divided by the path's market value when the pressure is high.
+	const auto * t = town ? town->getTown() : nullptr;
+	if(!t || !t->buildings.count(target))
+		return 0.0;
+	const CBuilding * b = t->buildings.at(target).get();
+	const double prereq = double(std::max(1, steps));
+	double strategic = 0.0, gold = 0.0, army = 0.0;
+
+	// Income, net of the building it replaces (a City Hall over a Town Hall).
+	TResources produce = b->produce;
+	if(b->upgrade != BuildingID::NONE && town->hasBuilt(b->upgrade) && t->buildings.count(b->upgrade))
+		produce -= t->buildings.at(b->upgrade)->produce;
+	produce.positive();
+	gold = 7.0 * double(produce.marketValue()) / 2.0;
+	if(gold > 0.0)
+		strategic += gold * pressure / 3500.0 / prereq;
+
+	// The town's army strength: a week of its best built dwelling per level.
+	double townArmy = 0.0;
+	for(int level = 0; level < int(t->creatures.size()); ++level)
+		for(int up = int(t->creatures[level].size()) - 1; up >= 0; --up)
+			if(town->hasBuilt(BuildingID::getDwellingFromLevel(level, up)))
+			{
+				if(const auto * cre = t->creatures[level][up].toCreature())
+					townArmy += double(std::max(0, town->creatureGrowth(level))) * double(std::max(0, cre->getAIValue()));
+				break;
+			}
+	int sameTownBonus = 0;
+	for(const CGTownInstance * other : cb->getTownsInfo())
+		if(other && other->tempOwner == playerID && other->getFactionID() == town->getFactionID())
+			sameTownBonus += other->getTownLevel();
+
+	for(int level = 0; level < int(t->creatures.size()); ++level)
+		for(int up = 0; up < int(t->creatures[level].size()); ++up)
+		{
+			if(BuildingID::getDwellingFromLevel(level, up) != target)
+				continue;
+			const auto * cre = t->creatures[level][up].toCreature();
+			const auto * base = t->creatures[level][0].toCreature();
+			if(!cre || !base)
+				continue;
+			double growth = double(cre->getGrowth());
+			if(town->hasBuilt(BuildingID::CASTLE))
+				growth *= 2.0;
+			else if(town->hasBuilt(BuildingID::CITADEL))
+				growth *= 1.5;
+			strategic += townArmy / 50000.0;
+			if(up == 0)
+			{
+				strategic += (0.5 + 0.1 * double(cre->getLevel())) / prereq;
+				army += 1.5 * growth * double(std::max(0, cre->getAIValue()));
+			}
+			else
+				army += growth * double(std::max(0, cre->getAIValue() - base->getAIValue()));
+		}
+	if(target == BuildingID::CITADEL || target == BuildingID::CASTLE)
+	{
+		strategic += double(t->creatures.size()) * 0.2;
+		army += townArmy / 2.0;
+	}
+	army *= double(std::max(1, sameTownBonus));
+
+	// What Nullkiller 1 leaves to its other terms (mage guild spells, the
+	// tavern, a market that unblocks a trade) keeps OmniAI's own valuation.
+	double other = 0.0;
+	if(gold <= 0.0 && army <= 0.0 && strategic <= 0.0)
+		other = buildingValue(town, target);
+
+	double score = strategic * 1000.0 + gold + army + other + 1000.0;
+	if(pressure > 0.3)
+		score /= std::max(1.0, double(pathCost.marketValue()));
+	return score;
+}
+
 double OmniAI::stockRate(const CGTownInstance * town) const
 {
 	// sw_BL (v2-exp-BL): the best army per gold the town's stock offers.
@@ -11379,6 +11498,9 @@ void OmniAI::buildInTown(const CGTownInstance * town)
 	// A threatened town needs soldiers on the wall this week, not a payback
 	// next month: no saving, and only steps that add walls or growth.
 	const bool threatened = dangerTowns_.count(townKey) != 0;
+	// sw_BW: the planner ranks by Nullkiller 1's building score and waits on gold pressure.
+	const bool bw = sw("BW");
+	const double pressure = bw ? goldPressure() : 0.0;
 	// Recomputed below every dawn, except under a threat. buildReserveTotal
 	// already leaves a threatened town out, so the gold is free for the wall
 	// today; wiping the saving as well meant it was gone on the morning the
@@ -11490,6 +11612,15 @@ void OmniAI::buildInTown(const CGTownInstance * town)
 		});
 		if(dead)
 			continue;
+		if(bw)
+		{
+			bool dwellingDep = false;
+			for(const BuildingID & p : path)
+				if(p != id && isDwelling(p))
+					dwellingDep = true;
+			if(dwellingDep)
+				continue;
+		}
 
 		TResources cost;
 		double value = 0;
@@ -11503,10 +11634,11 @@ void OmniAI::buildInTown(const CGTownInstance * town)
 				income = true;
 		}
 		const double gc = goldEquivalent(cost);
-		scan.push_back({ id, value, gc, gc > 0 ? value / gc : 0.0,
-			gc <= 0 || value <= gc * armyRate });
-		if(gc <= 0 || value <= gc * armyRate)
-			continue;   // its gold is worth more as soldiers
+		const double score = bw ? buildScore(town, id, cost, int(path.size()), pressure) : 0.0;
+		const bool waits = bw ? (pressure > 0.3 && !income && !threatened) : (gc <= 0 || value <= gc * armyRate);
+		scan.push_back({ id, value, gc, bw ? score / 1000.0 : (gc > 0 ? value / gc : 0.0), waits });
+		if(gc <= 0 || waits)
+			continue;   // BI: its gold is worth more as soldiers; sw_BW: it waits on gold pressure
 
 		// The step to take now: a member whose own requirements are met.
 		BuildingID next = BuildingID::NONE;
@@ -11547,7 +11679,7 @@ void OmniAI::buildInTown(const CGTownInstance * town)
 		}
 		if(next == BuildingID::NONE)
 			continue;
-		const double roi = value / gc;
+		const double roi = bw ? score / 1000.0 : value / gc;
 		if(roi > best.roi)
 			best = { id, next, value, gc, roi, nextAllowed, income };
 	}
@@ -11676,11 +11808,36 @@ void OmniAI::buildInAllTowns()
 	buildReserveCached_.store(buildReserveTotal());
 }
 
+// sw_BY and sw_BW: the City Hall purchase hold, lifted verbatim.
+bool OmniAI::troopBuyHeld(const CGTownInstance * town) const
+{
+	// Nullkiller 1 buys nothing in a town that can still raise a City Hall
+	// while its gold pressure is above 0.3 and no enemy is near that town
+	// (Behaviors/BuyArmyBehavior.cpp 41-46). Checked for every purchase from a
+	// town, so a hero who enters a town on a held day does not buy either
+	// (Opus Reviewer, October 10th: the hold first sat in recruitInAllTowns
+	// alone and returned before its garrison and upgrade steps). Only that
+	// town: holding every town while any one lacked a City Hall stalled all
+	// buying after a capture (Opus Reviewer, October 11th: V2M1BWJSM10 bought
+	// nothing on days 39 to 45 with 13,136 gold, V2M1BYJSM01 on days 56 to 61).
+	if(!cb || !town || town->tempOwner != playerID || goldPressure() <= 0.3
+		|| dangerTowns_.count(town->id.getNum()))
+		return false;
+	return !town->hasBuilt(BuildingID::CITY_HALL)
+		&& cb->canBuildStructure(town, BuildingID::CITY_HALL) != EBuildingState::FORBIDDEN;
+}
+
 void OmniAI::recruitFromDwelling(const CGDwelling * dwelling, const CArmedInstance * dst,
 	int goldReserve)
 {
 	if(!dwelling || !dst)
 		return;
+	if((sw("BY") || sw("BW")) && troopBuyHeld(dynamic_cast<const CGTownInstance *>(dwelling)))
+	{
+		decisionLog_->detail("recruitment held: gold pressure " + std::to_string(goldPressure()).substr(0, 4)
+			+ ", its City Hall still to come, buying nothing in " + dwelling->getObjectName());
+		return;
+	}
 
 	// Port of Nullkiller::recruitCreatures, level order reversed: highest
 	// tier first, not lowest. Per level, merge a duplicate stack if the

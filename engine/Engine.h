@@ -152,6 +152,12 @@ private:
 	std::set<std::pair<int32_t, int>> loadedLogged_; // hero/day a carried load first kept the hero out of a fight (sw_CK)
 	std::set<std::pair<int32_t, int3>> stopGuards_;  // hero/step tiles a walk stopped short of today (sw_CC)
 	double paidSum_ = 0.0;                           // worth of the visits our heroes completed (sw_BX density)
+	double pickupPaid_ = 0.0;                        // worth of the one-shot pickups seen gone (sw_CG density)
+	struct PendingPaid { int32_t id; int3 tile; double reward; int day; };
+	std::vector<PendingPaid> pendingPaid_;           // pickups walked to, not yet seen gone (sw_CG, settlePaid)
+	std::set<int32_t> paidIds_;                      // pickups already counted (sw_CG)
+	std::map<std::pair<int32_t, int3>, double> clusterCache_;   // (hero, guard) -> clusterValue, for the day (sw_CJ)
+	int clusterDay_ = -1;
 	std::map<int32_t, double> discovered_;           // object -> its worth to the main hero when first seen
 	double discoveredSum_ = 0.0;
 	int movesToday_ = 0;
@@ -178,6 +184,9 @@ private:
 	double xpScale(const CGHeroInstance * hero) const;
 	bool surroundingsSeen(const int3 & tile);
 	double gateValue(const CPathsInfo * paths, const int3 & guard);
+	double clusterValue(const CPathsInfo * paths, const int3 & guard, const CGHeroInstance * hero,
+		const CGObjectInstance * guardObj);
+	void settlePaid();
 	double onwardValue(const CGHeroInstance * hero, const int3 & tile) const;
 	bool dangerousFor(const CGHeroInstance * hero, const int3 & tile,
 		const std::vector<FoeInfo> & foes) const;

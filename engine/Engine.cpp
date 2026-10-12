@@ -521,8 +521,8 @@ void Engine::proposeExplore(std::vector<Target> & out, double knownValue)
 	// seen 0.78 of the tiles Nullkiller's had, by day 56 0.71.
 	// sw_BX (v2-exp-BX): what seen ground has paid (completed visits' worth
 	// per seen tile, with a prior), instead of what it held when first seen.
-	const double density = s_.on("BX")
-		? std::clamp((s_.densityPrior * s_.densityPriorTiles + 0.5 * paidSum_)
+	const double density = (s_.on("BX") || s_.on("CG"))
+		? std::clamp((s_.densityPrior * s_.densityPriorTiles + 0.5 * (s_.on("CG") ? pickupPaid_ : paidSum_))
 			/ (s_.densityPriorTiles + double(std::max(1, visible))), 5.0, 150.0)
 		: std::clamp(0.5 * discoveredSum_ / std::max(1, visible), 5.0, 150.0);
 	density_ = density;
@@ -807,6 +807,128 @@ double Engine::gateValue(const CPathsInfo * paths, const int3 & guard)
 	return 0.5 * density_ * double(count);
 }
 
+// sw_CJ (v2-exp-CJ a8aebe9), lifted verbatim.
+double Engine::clusterValue(const CPathsInfo * paths, const int3 & guard, const CGHeroInstance * hero,
+	const CGObjectInstance * guardObj)
+{
+	// The known objects this guard shuts off, valued as Nullkiller values the
+	// cluster a blocker seals (PriorityEvaluator.cpp 1048-1095, UNLOCK_CLUSTER):
+	// best first, each divided by 1, 2, 4 and 8 for the first four, a town's
+	// conquest worth added whole. The ground: seen, open tiles no route of the
+	// hero's reaches, flooded from the guard and stopped at another guard's
+	// zone, so a pile behind its own separate guard is not credited here.
+	// Unseen ground is worth nothing (gateValue priced it at the explore
+	// density, 45,000 for any guard before a large region at the cap).
+	if(!paths || !hero || visLevels_.empty() || guard.z < 0 || guard.z >= int(visLevels_.size()))
+		return 0.0;
+	if(clusterDay_ != day_)
+	{
+		clusterCache_.clear();
+		clusterDay_ = day_;
+	}
+	const auto key = std::make_pair(hero->id.getNum(), guard);
+	const auto hit = clusterCache_.find(key);
+	if(hit != clusterCache_.end())
+		return hit->second;
+
+	CCallback & cb = host_.game();
+	const int3 size = cb.getMapSize();
+	const int W = size.x, H = size.y;
+	const std::vector<uint8_t> & vis = visLevels_[guard.z];
+	auto inMap = [&](const int3 & q) { return q.x >= 0 && q.y >= 0 && q.x < W && q.y < H; };
+	auto reachable = [&](const int3 & q)
+	{
+		const CGPathNode * n = paths->getPathInfo(q);
+		return n && n->reachable();
+	};
+	auto openSeen = [&](const int3 & q)
+	{
+		if(!vis[q.y * W + q.x])
+			return false;
+		const TerrainTile * t = cb.getTile(q, false);
+		return t && !t->blocked() && !t->isWater();
+	};
+	auto otherGuard = [&](const int3 & q)
+	{
+		const CArmedInstance * g = host_.guardOnStep(q, hero);
+		return g && g != guardObj;
+	};
+	std::vector<int3> frontier;
+	std::set<int3> seenSet;
+	std::set<int32_t> objects;
+	auto collect = [&](const int3 & q)
+	{
+		if(!vis[q.y * W + q.x])
+			return;
+		for(const CGObjectInstance * obj : cb.getVisitableObjs(q, false))
+			if(obj && obj != guardObj)
+				objects.insert(obj->id.getNum());
+	};
+	seenSet.insert(guard);
+	for(int dy = -1; dy <= 1; ++dy)
+		for(int dx = -1; dx <= 1; ++dx)
+		{
+			const int3 q(guard.x + dx, guard.y + dy, guard.z);
+			if((!dx && !dy) || !inMap(q))
+				continue;
+			seenSet.insert(q);
+			if(!reachable(q) && openSeen(q) && !otherGuard(q))
+				frontier.push_back(q);
+			else if(!reachable(q))
+				collect(q);
+		}
+	constexpr size_t LIMIT = 4000;
+	for(size_t i = 0; i < frontier.size() && i < LIMIT; ++i)
+	{
+		const int3 p = frontier[i];
+		collect(p);
+		for(int dy = -1; dy <= 1; ++dy)
+			for(int dx = -1; dx <= 1; ++dx)
+			{
+				const int3 q(p.x + dx, p.y + dy, p.z);
+				if((!dx && !dy) || !inMap(q) || seenSet.count(q))
+					continue;
+				seenSet.insert(q);
+				if(reachable(q))
+					continue;
+				if(openSeen(q) && !otherGuard(q))
+					frontier.push_back(q);
+				else
+					collect(q);   // a pile, a mine or a town on a blocked tile beside the ground
+			}
+	}
+
+	std::vector<double> values;
+	double conquest = 0.0;
+	for(int32_t id : objects)
+	{
+		const CGObjectInstance * obj = cb.getObj(ObjectInstanceID(id), false);
+		if(!obj || obj->ID == Obj::MONSTER || obj->ID == Obj::HERO)
+			continue;
+		if(const auto * town = dynamic_cast<const CGTownInstance *>(obj))
+		{
+			if(town->tempOwner != host_.me())
+				conquest += std::max(0.0, host_.worth(obj, hero));
+			continue;
+		}
+		const bool candidate = dynamic_cast<const CGMine *>(obj) || dynamic_cast<const CGResource *>(obj)
+			|| dynamic_cast<const CGDwelling *>(obj) || dynamic_cast<const CGArtifact *>(obj)
+			|| dynamic_cast<const Rewardable::Interface *>(obj) || obj->ID == Obj::PRISON;
+		if(!candidate)
+			continue;
+		const double v = visitValue(obj, hero);
+		if(v > 0.0)
+			values.push_back(v);
+	}
+	std::sort(values.begin(), values.end(), std::greater<double>());
+	double value = conquest;
+	double weight = 1.0;
+	for(size_t i = 0; i < values.size() && i < 4; ++i, weight *= 0.5)
+		value += weight * values[i];
+	clusterCache_[key] = value;
+	return value;
+}
+
 bool Engine::surroundingsSeen(const int3 & tile)
 {
 	// A guard hidden in the fog is not priced; a job is only taken once the
@@ -907,7 +1029,8 @@ bool Engine::scoreOne(const CGHeroInstance * hero, const CPathsInfo * paths, con
 			for(const auto & slot : armed->Slots())
 				if(slot.second && slot.second->getCreature())
 					xp += double(slot.second->getCount()) * double(slot.second->getCreature()->getMaxHealth());
-			reward = xpWorth(hero, xp) + host_.pocketBehind(t.tile, hero) + gateValue(paths, t.tile);
+			reward = xpWorth(hero, xp) + (s_.on("CJ") ? clusterValue(paths, t.tile, hero, armed)
+				: host_.pocketBehind(t.tile, hero) + gateValue(paths, t.tile));
 			if(reward <= 0.0)
 				return false;
 			if(!priceFight(armed))
@@ -1096,7 +1219,8 @@ std::vector<Option> Engine::scoreOptions(const std::vector<Target> & targets)
 			o << " " << (t.kind == Target::Kind::EnemyTown ? "TOWN " : "") << t.name << "(" << fmt0(double(armed->getArmyStrength())) << ")"
 			  << (e.win ? " win " : " lose ") << fmt2(e.kept) << " xp " << fmt0(xp)
 			  << " r " << fmt0(xpWorth(main, xp) + host_.pocketBehind(t.tile, main))
-			  << " gate " << fmt0(t.kind == Target::Kind::Monster ? gateValue(shared.get(), t.tile) : 0.0)
+			  << (s_.on("CJ") ? " cluster " : " gate ") << fmt0(t.kind == Target::Kind::Monster
+				? (s_.on("CJ") ? clusterValue(shared.get(), t.tile, main, armed) : gateValue(shared.get(), t.tile)) : 0.0)
 			  << " t" << int(node->turns) << ";";
 			++n;
 		}
@@ -1304,9 +1428,41 @@ std::vector<Option> Engine::assign(std::vector<Option> options, const std::vecto
 	return plan;
 }
 
+// sw_CG (v2-exp-CG 4b297e5), lifted verbatim; its tally is pickupPaid_.
+void Engine::settlePaid()
+{
+	// A noted pickup counts once its object is gone from a tile in sight; one
+	// still there on a later day was not taken (a fight lost or refused, a
+	// dialog declined); a tile out of sight (Cover of Darkness hides objects)
+	// waits up to two days.
+	CCallback & cb = host_.game();
+	std::vector<PendingPaid> keep;
+	for(const PendingPaid & p : pendingPaid_)
+	{
+		if(!cb.isVisible(p.tile))
+		{
+			if(day_ - p.day < 2)
+				keep.push_back(p);
+			continue;
+		}
+		if(!cb.getObj(ObjectInstanceID(p.id), false))
+		{
+			// Two heroes can walk to one chest while its dialog is open; it is
+			// paid once.
+			if(paidIds_.insert(p.id).second)
+				pickupPaid_ += p.reward;
+		}
+		else if(day_ == p.day)
+			keep.push_back(p);
+	}
+	pendingPaid_.swap(keep);
+}
+
 bool Engine::execute(const std::vector<Option> & plan, const std::vector<Target> & targets, int pass)
 {
 	CCallback & cb = host_.game();
+	if(s_.on("CG"))
+		settlePaid();
 	// Army joins the main hero before the main hero walks away from it.
 	std::vector<Option> order = plan;
 	std::stable_sort(order.begin(), order.end(), [&](const Option & a, const Option & b)
@@ -1397,6 +1553,19 @@ bool Engine::execute(const std::vector<Option> & plan, const std::vector<Target>
 		const int3 before = hero->visitablePos();
 		const int mpBefore = hero->movementPointsRemaining();
 		const double armyBefore = armyOf(hero);
+		// sw_CG: a one-shot pickup walked to is paid once it is seen gone.
+		bool oneShot = false;
+		if(s_.on("CG") && t.kind == Target::Kind::Visit)
+			if(const CGObjectInstance * tobj = cb.getObj(t.id, false))
+				switch(tobj->ID.toEnum())
+				{
+					case Obj::RESOURCE: case Obj::TREASURE_CHEST: case Obj::CAMPFIRE: case Obj::ARTIFACT:
+					case Obj::SPELL_SCROLL: case Obj::PANDORAS_BOX: case Obj::SEA_CHEST: case Obj::FLOTSAM:
+						oneShot = true;
+						break;
+					default:
+						break;
+				}
 		// sw_BS: a gather's success is read on the main hero, not the carrier.
 		const CGHeroInstance * gatherTo = t.kind == Target::Kind::Gather ? cb.getHero(t.id) : nullptr;
 		const double mainBefore = gatherTo ? armyOf(gatherTo) : 0.0;
@@ -1445,6 +1614,8 @@ bool Engine::execute(const std::vector<Option> & plan, const std::vector<Target>
 			visited_[{o.hero, t.tile}] = day_;
 			paidSum_ += std::max(0.0, o.reward);
 		}
+		if(oneShot && hero->visitablePos().z == t.tile.z && chebyshev(hero->visitablePos(), t.tile) <= 1)
+			pendingPaid_.push_back({t.id.getNum(), t.tile, std::max(0.0, o.reward), day_});
 		if(hero->visitablePos() == t.tile && t.kind == Target::Kind::OwnTown && o.hero != mainHero_ && o.reward > 0.0)
 			if(const auto * town = dynamic_cast<const CGTownInstance *>(cb.getObj(t.id, false)))
 			{

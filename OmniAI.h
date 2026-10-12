@@ -352,6 +352,10 @@ private:
 	int buildReserveTotal() const;
 	/// Gold beyond the planner's target, all creatures on sale and one hire.
 	int surplusGold() const;
+	double goldPressure() const;
+	bool troopBuyHeld(const CGTownInstance * town) const;
+	double buildScore(const CGTownInstance * town, const BuildingID & target,
+		const TResources & pathCost, int steps, double pressure) const;
 	/// Upgrade this army's stacks in place, best upgrade first, paid from
 	/// surplus gold only. The army must be in a town that offers them.
 	void upgradeArmy(const CArmedInstance * army, double beatRate = -1.0);
