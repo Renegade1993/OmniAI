@@ -236,7 +236,10 @@ void Engine::pickMainHero()
 	// The army moves between heroes; a hero's levels and primary skills do
 	// not. So a hero is scored by its own fighting strength times the army
 	// that can pool on it: its own and every other hero's that reaches it
-	// within three days. By its own army alone, a courier carrying a town's
+	// inside the horizon the gather jobs use (CL's first cut counted three
+	// days: in V2M1CL3SM05 a hire took the capital's 28364 on day 29 with the
+	// main hero 80 tiles off, and the role still went to the level-1 hire).
+	// By its own army alone, a courier carrying a town's
 	// week of recruits outweighed a main hero worn down by fights: in BI's 120
 	// games on new seeds the role switched a median of once by day 56, and
 	// 64% of the new main heroes were level 1, while Nullkiller keeps one
@@ -255,7 +258,7 @@ void Engine::pickMainHero()
 				continue;
 			const auto & po = pathsOf[o->id.getNum()];
 			const CGPathNode * n = po ? po->getPathInfo(h->visitablePos()) : nullptr;
-			if(n && n->reachable() && n->turns <= 3)
+			if(n && n->reachable() && double(n->turns) <= s_.horizonDays)
 				pool += armyOf(o);
 		}
 		return h->getHeroStrength() * pool;
