@@ -10,7 +10,10 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
+#include <fstream>
 #include <iomanip>
+#include <regex>
 #include <sstream>
 
 #include "callback/CCallback.h"
@@ -55,6 +58,98 @@ std::string fmt2(double v)
 Engine::Engine(IEngineHost & host, Settings settings)
 	: host_(host), s_(settings)
 {
+}
+
+Settings loadSettings(const std::string & path, std::string & hash, std::string & note)
+{
+	Settings s;
+	// Every field, in a fixed order; a new field goes at the end of its list.
+	const std::vector<std::pair<const char *, double *>> reals = {
+		{"lossBudget", &s.lossBudget}, {"momentum", &s.momentum}, {"horizonDays", &s.horizonDays},
+		{"gatherWorth", &s.gatherWorth}, {"garrisonWorth", &s.garrisonWorth}, {"courierWorth", &s.courierWorth},
+		{"heroKillBonus", &s.heroKillBonus}, {"enemyArmyWorth", &s.enemyArmyWorth}, {"xpScaleMain", &s.xpScaleMain},
+		{"xpScaleSupport", &s.xpScaleSupport}, {"needCap", &s.needCap}, {"goldNeedCap", &s.goldNeedCap},
+		{"valueExponent", &s.valueExponent}, {"onwardShare", &s.onwardShare}, {"townSwitchMargin", &s.townSwitchMargin}};
+	const std::vector<std::pair<const char *, int *>> ints = {
+		{"onwardRadius", &s.onwardRadius}, {"maxPasses", &s.maxPasses}, {"baseHeroes", &s.baseHeroes},
+		{"maxHeroes", &s.maxHeroes}};
+	std::string set, unknown, text;
+	bool haveFile = false;
+	if(!path.empty())
+	{
+		std::ifstream in(path, std::ios::binary);
+		if(in)
+		{
+			std::ostringstream ss;
+			ss << in.rdbuf();
+			text = ss.str();
+			haveFile = true;
+		}
+	}
+	if(haveFile)
+	{
+		static const std::regex kv("\"([A-Za-z_][A-Za-z0-9_]*)\"\\s*:\\s*(-?[0-9.]+(?:[eE][-+]?[0-9]+)?|true|false)");
+		for(std::sregex_iterator it(text.begin(), text.end(), kv), end; it != end; ++it)
+		{
+			const std::string key = (*it)[1];
+			const std::string raw = (*it)[2];
+			const double v = raw == "true" ? 1.0 : raw == "false" ? 0.0 : std::atof(raw.c_str());
+			bool known = false;
+			if(key.rfind("sw_", 0) == 0)
+			{
+				s.switches[key.substr(3)] = v != 0.0 ? 1 : 0;
+				known = true;
+			}
+			for(auto & f : reals)
+				if(key == f.first)
+				{
+					if(*f.second != v)
+						set += std::string(set.empty() ? "" : ",") + key + "=" + raw;
+					*f.second = v;
+					known = true;
+				}
+			for(auto & f : ints)
+				if(key == f.first)
+				{
+					if(*f.second != int(v))
+						set += std::string(set.empty() ? "" : ",") + key + "=" + raw;
+					*f.second = int(v);
+					known = true;
+				}
+			if(!known)
+				unknown += std::string(unknown.empty() ? "" : ",") + key;
+		}
+	}
+	// The hash covers what the engine will play with, not how the file spells it.
+	std::string canon, sw;
+	char buf[64];
+	for(auto & f : reals)
+	{
+		std::snprintf(buf, sizeof(buf), "%s=%.9g;", f.first, *f.second);
+		canon += buf;
+	}
+	for(auto & f : ints)
+	{
+		std::snprintf(buf, sizeof(buf), "%s=%d;", f.first, *f.second);
+		canon += buf;
+	}
+	for(const auto & e : s.switches)
+		if(e.second)
+		{
+			canon += "sw_" + e.first + "=1;";
+			sw += std::string(sw.empty() ? "" : ",") + e.first;
+		}
+	uint64_t h = 1469598103934665603ULL;
+	for(unsigned char c : canon)
+	{
+		h ^= c;
+		h *= 1099511628211ULL;
+	}
+	std::snprintf(buf, sizeof(buf), "%016llx", (unsigned long long)h);
+	hash = buf;
+	note = "file=" + (haveFile ? path : std::string("none")) + " set=" + (set.empty() ? "-" : set)
+		+ " sw=" + (sw.empty() ? "-" : sw) + " unknown=" + (unknown.empty() ? "-" : unknown);
+	return s;
 }
 
 double Engine::armyOf(const CGHeroInstance * hero)

@@ -77,7 +77,23 @@ struct Settings
 	/// first, never more than `maxHeroes`.
 	int baseHeroes = 3;
 	int maxHeroes = 5;
+	/// Switches from the parameter file (keys "sw_<name>"), off unless set:
+	/// each parked candidate behind one, so one binary plays every arm.
+	std::map<std::string, int> switches;
+	bool on(const std::string & name) const
+	{
+		const auto it = switches.find(name);
+		return it != switches.end() && it->second != 0;
+	}
 };
+
+/// Reads the parameter file at game start (October 12th, plan task 1): a flat
+/// JSON object of Settings field names and numbers, and "sw_<name>" switches.
+/// A field the file does not name keeps its default (BI's value). `hash` is
+/// FNV-1a 64 over every field's effective value and the switches that are on,
+/// in a fixed order; `note` says which file, what it changed, what it did not
+/// know.
+Settings loadSettings(const std::string & path, std::string & hash, std::string & note);
 
 struct Target
 {

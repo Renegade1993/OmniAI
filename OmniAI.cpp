@@ -770,7 +770,17 @@ void OmniAI::initGameInterface(std::shared_ptr<Environment> ENV, std::shared_ptr
 	{
 		const char * which = std::getenv("OMNIAI_ENGINE");
 		if(!(which && std::string(which) == "1"))
-			engineV2_ = std::make_unique<omniai::v2::Engine>(*this);
+		{
+			// The parameter file (October 12th, plan task 1): params.json in
+			// the OmniAI folder; none means BI's values. Its hash goes in the
+			// header so every game's record names its configuration.
+			const std::string dir = omniDir();
+			std::string hash, note;
+			omniai::v2::Settings settings = omniai::v2::loadSettings(
+				dir.empty() ? std::string() : dir + "\\params.json", hash, note);
+			engineV2_ = std::make_unique<omniai::v2::Engine>(*this, settings);
+			decisionLog_->line("  PARAMS hash=" + hash + " " + note);
+		}
 		decisionLog_->line(std::string("  ENGINE ") + (engineV2_ ? "v2" : "legacy"));
 	}
 
