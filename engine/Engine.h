@@ -126,6 +126,7 @@ private:
 	std::map<int32_t, int> noMoves_;                 // walks sent today that moved nothing, per hero
 	std::map<std::pair<int32_t, int3>, int> visited_; // hero/tile visits made, by day
 	std::map<int32_t, int> gatherFailed_;            // hero -> day its hand-over to the main hero moved nothing
+	std::set<std::pair<int32_t, int>> loadedLogged_; // hero/day a carried load first kept the hero out of a fight
 	std::map<int32_t, double> discovered_;           // object -> its worth to the main hero when first seen
 	double discoveredSum_ = 0.0;
 	int movesToday_ = 0;
@@ -155,6 +156,7 @@ private:
 	double onwardValue(const CGHeroInstance * hero, const int3 & tile) const;
 	bool dangerousFor(const CGHeroInstance * hero, const int3 & tile,
 		const std::vector<FoeInfo> & foes) const;
+	bool carriesForMain(const CGHeroInstance * hero, const CPathsInfo * paths) const;
 	static double armyOf(const CGHeroInstance * hero);
 	static std::string kindName(Target::Kind kind);
 };

@@ -57,6 +57,25 @@ Engine::Engine(IEngineHost & host, Settings settings)
 {
 }
 
+bool Engine::carriesForMain(const CGHeroInstance * hero, const CPathsInfo * paths) const
+{
+	// The share a gather is proposed for is 8% of the main hero's army; a
+	// quarter is a load worth the walk before anything else. A gather benched
+	// after a hand-over that moved nothing leaves the hero its own army.
+	if(!hero || !paths || mainHero_ < 0 || hero->id.getNum() == mainHero_)
+		return false;
+	const CGHeroInstance * main = host_.game().getHero(ObjectInstanceID(mainHero_));
+	if(!main)
+		return false;
+	if(armyOf(hero) < std::max(1500.0, 0.25 * armyOf(main)))
+		return false;
+	const auto failed = gatherFailed_.find(hero->id.getNum());
+	if(failed != gatherFailed_.end() && day_ - failed->second < 3)
+		return false;
+	const CGPathNode * node = paths->getPathInfo(main->visitablePos());
+	return node && node->reachable() && double(node->turns) <= s_.horizonDays;
+}
+
 double Engine::armyOf(const CGHeroInstance * hero)
 {
 	return hero ? double(hero->getArmyStrength()) : 0.0;
@@ -850,6 +869,24 @@ bool Engine::scoreOne(const CGHeroInstance * hero, const CPathsInfo * paths, con
 				return false;
 			break;
 		}
+	}
+
+	// A support hero carrying a real share of the army hands it to the main
+	// hero before it spends any of it: it fights at its own low attack and
+	// defence, and the army it loses is the main hero's next fights. BI, 120
+	// games on new seeds: couriers fought 848 fights still carrying a garrison
+	// they had taken and lost 2.4M army in them by day 56 (about 20k a game);
+	// support fights cost 14.9% of the army they started with to day 28, the
+	// main hero's 9.7%; our main hero held 0.59-0.66 of our heroes' army in
+	// weeks 1-2, Nullkiller's best hero 0.86-0.94. Fights that cost nothing,
+	// and enemy heroes and towns, are not held back.
+	if(loss > 0.0 && !isMain && (t.kind == Target::Kind::Monster || t.kind == Target::Kind::Visit
+		|| t.kind == Target::Kind::Explore) && carriesForMain(hero, paths))
+	{
+		if(loadedLogged_.insert({hero->id.getNum(), day_}).second)
+			host_.logLine("   V2 LOADED " + hero->getNameTranslated() + " (" + fmt0(army)
+				+ ") goes to the main hero before it fights " + t.name);
+		return false;
 	}
 
 	const double net = reward - loss;
