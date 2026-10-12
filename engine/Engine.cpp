@@ -233,14 +233,48 @@ void Engine::pickMainHero()
 {
 	CCallback & cb = host_.game();
 	const CGHeroInstance * current = mainHero_ >= 0 ? cb.getHero(ObjectInstanceID(mainHero_)) : nullptr;
+	// The army moves between heroes; a hero's levels and primary skills do
+	// not. So a hero is scored by its own fighting strength times the army
+	// that can pool on it: its own and every other hero's that reaches it
+	// within three days. By its own army alone, a courier carrying a town's
+	// week of recruits outweighed a main hero worn down by fights: in BI's 120
+	// games on new seeds the role switched a median of once by day 56, and
+	// 64% of the new main heroes were level 1, while Nullkiller keeps one
+	// main hero (its experience 45k against our 29k on day 42).
+	const auto heroes = cb.getHeroesInfo();
+	std::map<int32_t, std::shared_ptr<const CPathsInfo>> pathsOf;
+	for(const CGHeroInstance * o : heroes)
+		if(o)
+			pathsOf[o->id.getNum()] = host_.paths(o);
+	auto value = [&](const CGHeroInstance * h) -> double
+	{
+		double pool = armyOf(h);
+		for(const CGHeroInstance * o : heroes)
+		{
+			if(!o || o == h)
+				continue;
+			const auto & po = pathsOf[o->id.getNum()];
+			const CGPathNode * n = po ? po->getPathInfo(h->visitablePos()) : nullptr;
+			if(n && n->reachable() && n->turns <= 3)
+				pool += armyOf(o);
+		}
+		return h->getHeroStrength() * pool;
+	};
 	const CGHeroInstance * best = nullptr;
-	for(const CGHeroInstance * h : cb.getHeroesInfo())
-		if(h && (!best || h->getTotalStrength() > best->getTotalStrength()))
-			best = h;
-	// Keep the incumbent unless another hero is plainly stronger, so the role
+	double bestValue = -1.0;
+	for(const CGHeroInstance * h : heroes)
+		if(h)
+		{
+			const double v = value(h);
+			if(v > bestValue)
+			{
+				bestValue = v;
+				best = h;
+			}
+		}
+	// Keep the incumbent unless another hero is plainly better, so the role
 	// (and the army that flows to it) does not swap on one week's recruits.
-	if(current && best && best != current
-		&& double(best->getTotalStrength()) < 1.3 * double(current->getTotalStrength()))
+	if(current && best && best != current && bestValue < 1.3 * value(current))
 		best = current;
 	const int32_t id = best ? best->id.getNum() : -1;
 	if(id != mainHero_)
