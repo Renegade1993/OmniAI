@@ -153,6 +153,14 @@ private:
 	std::unique_ptr<omniai::DecisionLog> decisionLog_;
 	/// The v2 execution engine; null when OMNIAI_ENGINE=1 asks for the legacy one.
 	std::unique_ptr<omniai::v2::Engine> engineV2_;
+	/// Switches from params.json (October 12th, plan task 8), for the shell's
+	/// own code; the engine reads its copy in its Settings.
+	std::map<std::string, int> switches_;
+	bool sw(const char * name) const
+	{
+		const auto it = switches_.find(name);
+		return it != switches_.end() && it->second != 0;
+	}
 	/// Spectator narration: decision-log lines worth reading, queued from
 	/// any thread and sent to the game chat from the turn loop.
 	/// Week-one mine plan (September 25th): our heroes paired with the mines

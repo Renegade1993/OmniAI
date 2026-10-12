@@ -778,6 +778,7 @@ void OmniAI::initGameInterface(std::shared_ptr<Environment> ENV, std::shared_ptr
 			std::string hash, note;
 			omniai::v2::Settings settings = omniai::v2::loadSettings(
 				dir.empty() ? std::string() : dir + "\\params.json", hash, note);
+			switches_ = settings.switches;
 			engineV2_ = std::make_unique<omniai::v2::Engine>(*this, settings);
 			decisionLog_->line("  PARAMS hash=" + hash + " " + note);
 		}
@@ -9924,7 +9925,8 @@ uint64_t OmniAI::recruitsOnOffer(const CGObjectInstance * obj) const
 		if(level.first == 0 || level.second.empty())
 			continue;
 		const auto * cre = level.second.back().toCreature();
-		if(cre)
+		// sw_BQ (v2-exp-BQ): a war machine goes to an artifact slot, so it is not army on offer.
+		if(cre && (!sw("BQ") || cre->warMachine == ArtifactID::NONE))
 			total += uint64_t(level.first) * uint64_t(std::max(0, cre->getAIValue()));
 	}
 	return total;
@@ -10943,7 +10945,8 @@ double OmniAI::buildingValue(const CGTownInstance * town, const BuildingID & id)
 	// a gold piece is worth once it has become soldiers. The gold rate comes
 	// from creature costs in the shipped data, where a Pikeman is 80 of army
 	// for 60 gold and a Griffin 351 for 200, so somewhere above one.
-	const double HORIZON_DAYS = valueHorizonDays();
+	// sw_CE (v2-exp-CE): a building is weighed against soldiers over at most 56 days.
+	const double HORIZON_DAYS = sw("CE") ? std::min(56.0, valueHorizonDays()) : valueHorizonDays();
 	const double WEEKS_AHEAD = HORIZON_DAYS / 7.0;
 	constexpr double ARMY_PER_GOLD = 1.2;
 	// A unit of wood or ore is worth more than a gold piece because it gates
@@ -11157,7 +11160,7 @@ double OmniAI::fortGrowthValue(const CGTownInstance * town, const BuildingID & i
 	const auto * t = town->getTown();
 	if(!t)
 		return 0.0;
-	const double WEEKS_AHEAD = valueHorizonDays() / 7.0;   // buildingValue's horizon
+	const double WEEKS_AHEAD = (sw("CE") ? std::min(56.0, valueHorizonDays()) : valueHorizonDays()) / 7.0;   // buildingValue's horizon (sw_CE)
 	double weekly = 0.0;
 	for(int level = 0; level < GameConstants::CREATURES_PER_TOWN; ++level)
 	{
@@ -12576,7 +12579,8 @@ void OmniAI::townPhase(bool firstOfDay)
 		// first two days of a week (and in the first days when contact comes
 		// early); the rest of the week the building goes first.
 		const int dow = cb->getDate(Date::DAY_OF_WEEK);
-		if(dow <= 2 || (contactSoon() && cb->getDate(Date::DAY) <= 3))
+		// sw_CH (v2-exp-CH): not in the game's first week, where the building goes first.
+		if((dow <= 2 && (!sw("CH") || cb->getDate(Date::DAY) > 7)) || (contactSoon() && cb->getDate(Date::DAY) <= 3))
 			recruitInAllTowns();
 		tradeForBlockedBuilding();
 		buildInAllTowns();

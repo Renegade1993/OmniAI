@@ -69,7 +69,8 @@ Settings loadSettings(const std::string & path, std::string & hash, std::string 
 		{"gatherWorth", &s.gatherWorth}, {"garrisonWorth", &s.garrisonWorth}, {"courierWorth", &s.courierWorth},
 		{"heroKillBonus", &s.heroKillBonus}, {"enemyArmyWorth", &s.enemyArmyWorth}, {"xpScaleMain", &s.xpScaleMain},
 		{"xpScaleSupport", &s.xpScaleSupport}, {"needCap", &s.needCap}, {"goldNeedCap", &s.goldNeedCap},
-		{"valueExponent", &s.valueExponent}, {"onwardShare", &s.onwardShare}, {"townSwitchMargin", &s.townSwitchMargin}};
+		{"valueExponent", &s.valueExponent}, {"onwardShare", &s.onwardShare}, {"townSwitchMargin", &s.townSwitchMargin},
+		{"lossWeight", &s.lossWeight}, {"densityPrior", &s.densityPrior}, {"densityPriorTiles", &s.densityPriorTiles}};
 	const std::vector<std::pair<const char *, int *>> ints = {
 		{"onwardRadius", &s.onwardRadius}, {"maxPasses", &s.maxPasses}, {"baseHeroes", &s.baseHeroes},
 		{"maxHeroes", &s.maxHeroes}};
@@ -152,6 +153,22 @@ Settings loadSettings(const std::string & path, std::string & hash, std::string 
 	return s;
 }
 
+bool Engine::carriesForMain(const CGHeroInstance * hero, const CPathsInfo * paths) const
+{
+	if(!hero || !paths || mainHero_ < 0 || hero->id.getNum() == mainHero_)
+		return false;
+	const CGHeroInstance * main = host_.game().getHero(ObjectInstanceID(mainHero_));
+	if(!main)
+		return false;
+	if(armyOf(hero) < std::max(1500.0, 0.25 * armyOf(main)))
+		return false;
+	const auto failed = gatherFailed_.find(hero->id.getNum());
+	if(failed != gatherFailed_.end() && day_ - failed->second < 3)
+		return false;
+	const CGPathNode * node = paths->getPathInfo(main->visitablePos());
+	return node && node->reachable() && double(node->turns) <= s_.horizonDays;
+}
+
 double Engine::armyOf(const CGHeroInstance * hero)
 {
 	return hero ? double(hero->getArmyStrength()) : 0.0;
@@ -177,6 +194,7 @@ void Engine::makeTurn()
 	CCallback & cb = host_.game();
 	day_ = cb.getDate(Date::DAY);
 	blocked_.clear();
+	stopGuards_.clear();
 	doneToday_.clear();
 	noMoves_.clear();
 	movesToday_ = 0;
@@ -473,7 +491,12 @@ void Engine::proposeExplore(std::vector<Target> & out, double knownValue)
 	// value still lying on it fell as heroes collected it, so exploring lost
 	// to the leftovers nearby: by day 28 of the M1 gate (V2M1T) our heroes had
 	// seen 0.78 of the tiles Nullkiller's had, by day 56 0.71.
-	const double density = std::clamp(0.5 * discoveredSum_ / std::max(1, visible), 5.0, 150.0);
+	// sw_BX (v2-exp-BX): what seen ground has paid (completed visits' worth
+	// per seen tile, with a prior), instead of what it held when first seen.
+	const double density = s_.on("BX")
+		? std::clamp((s_.densityPrior * s_.densityPriorTiles + 0.5 * paidSum_)
+			/ (s_.densityPriorTiles + double(std::max(1, visible))), 5.0, 150.0)
+		: std::clamp(0.5 * discoveredSum_ / std::max(1, visible), 5.0, 150.0);
 	density_ = density;
 	const int R = 5;
 	for(int z = 0; z < size.z; ++z)
@@ -728,12 +751,20 @@ double Engine::gateValue(const CPathsInfo * paths, const int3 & guard)
 				seenSet.insert(q);
 			}
 		}
-	int count = 0;
-	constexpr int LIMIT = 600;
-	for(size_t i = 0; i < frontier.size() && count < LIMIT; ++i)
+	int count = 0, unseen = 0;
+	constexpr int LIMIT = 600, UNSEEN_CAP = 121;
+	// sw_BO (v2-exp-BO): unseen tiles behind the guard count at most 121.
+	const bool bo = s_.on("BO");
+	for(size_t i = 0; i < frontier.size() && count < LIMIT && (!bo || i < size_t(4 * LIMIT)); ++i)
 	{
 		const int3 p = frontier[i];
-		++count;
+		if(!bo || vis[p.y * W + p.x])
+			++count;
+		else if(unseen < UNSEEN_CAP)
+		{
+			++unseen;
+			++count;
+		}
 		for(int dy = -1; dy <= 1; ++dy)
 			for(int dx = -1; dx <= 1; ++dx)
 			{
@@ -798,6 +829,10 @@ bool Engine::scoreOne(const CGHeroInstance * hero, const CPathsInfo * paths, con
 	const CGPathNode * node = paths->getPathInfo(t.tile);
 	if(!node || !node->reachable())
 		return false;
+	if(s_.on("CC") && !stopGuards_.empty())
+		for(const CGPathNode * n = node; n; n = n->theNodeBefore)
+			if(stopGuards_.count({hero->id.getNum(), hero->convertToVisitablePos(n->coord)}))
+				return false;
 	const double maxMp = double(std::max(1, hero->movementPointsLimit(true)));
 	const double days = double(node->turns)
 		+ std::clamp(1.0 - double(node->moveRemains) / maxMp, 0.0, 1.0);
@@ -947,7 +982,19 @@ bool Engine::scoreOne(const CGHeroInstance * hero, const CPathsInfo * paths, con
 		}
 	}
 
-	const double net = reward - loss;
+	// sw_CK (v2-exp-CK 3cd6ce6): a support hero carrying at least a quarter of
+	// the main hero's army hands it over before it spends any in a fight.
+	if(s_.on("CK") && loss > 0.0 && !isMain && (t.kind == Target::Kind::Monster || t.kind == Target::Kind::Visit
+		|| t.kind == Target::Kind::Explore) && carriesForMain(hero, paths))
+	{
+		if(loadedLogged_.insert({hero->id.getNum(), day_}).second)
+			host_.logLine("   V2 LOADED " + hero->getNameTranslated() + " (" + fmt0(army)
+				+ ") goes to the main hero before it fights " + t.name);
+		return false;
+	}
+
+	// lossWeight: BI 1.0; BK (1501abe) 1.5.
+	const double net = reward - s_.lossWeight * loss;
 	if(net <= 0.0)
 		return false;
 	double score = std::pow(net, s_.valueExponent) / (days + 0.25);
@@ -1051,6 +1098,24 @@ std::vector<Option> Engine::scoreOptions(const std::vector<Target> & targets)
 			if(scoreOne(hero, paths, t, o))
 				options.push_back(o);
 		}
+	}
+
+	// sw_BT (v2-exp-BT): a hero with another paying job within a day drops its
+	// plain explore jobs; monoliths, gates and road frontier stay.
+	if(s_.on("BT"))
+	{
+		std::set<int32_t> paysToday;
+		for(const Option & o : options)
+			if(targets[o.target].kind != Target::Kind::Explore && o.days <= 1.0 && o.score > 0.0)
+				paysToday.insert(o.hero);
+		options.erase(std::remove_if(options.begin(), options.end(), [&](const Option & o)
+		{
+			const Target & t = targets[o.target];
+			if(t.kind != Target::Kind::Explore || !paysToday.count(o.hero) || t.id.hasValue())
+				return false;
+			const TerrainTile * tile = cb.getTile(t.tile, false);
+			return !(tile && tile->hasRoad());
+		}), options.end());
 	}
 
 	// A hero with nothing worth doing goes to the nearest town of ours: it
@@ -1287,6 +1352,7 @@ bool Engine::execute(const std::vector<Option> & plan, const std::vector<Target>
 			host_.logLine("   V2 STOP " + hero->getNameTranslated() + " short of " + tile.toString()
 				+ ": guard " + foe->getObjectName() + " (" + fmt0(double(foe->getArmyStrength()))
 				+ ") at step " + std::to_string(i + 1) + " of " + std::to_string(steps.size()));
+			stopGuards_.insert({o.hero, tile});
 			steps.resize(i);
 			break;
 		}
@@ -1335,7 +1401,10 @@ bool Engine::execute(const std::vector<Option> & plan, const std::vector<Target>
 		if(t.kind == Target::Kind::OwnTown && o.score >= 1e10)
 			recallTown_ = t.id.getNum();   // a threat recall (see scoreOptions)
 		if(hero->visitablePos() == t.tile && t.kind == Target::Kind::Visit)
+		{
 			visited_[{o.hero, t.tile}] = day_;
+			paidSum_ += std::max(0.0, o.reward);
+		}
 		if(hero->visitablePos() == t.tile && t.kind == Target::Kind::OwnTown && o.hero != mainHero_ && o.reward > 0.0)
 			if(const auto * town = dynamic_cast<const CGTownInstance *>(cb.getObj(t.id, false)))
 			{

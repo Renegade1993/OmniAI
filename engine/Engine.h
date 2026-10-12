@@ -73,6 +73,13 @@ struct Settings
 	double townSwitchMargin = 2.0;
 	/// Passes per day, a bound.
 	int maxPasses = 40;
+	/// Army lost in a voluntary fight counts this many times its value
+	/// against the reward (BK, 1501abe, used 1.5; BI's value is 1.0).
+	double lossWeight = 1.0;
+	/// BX's explore-density prior (army value per tile over this many tiles),
+	/// read only with sw_BX.
+	double densityPrior = 30.0;
+	double densityPriorTiles = 500.0;
 	/// Heroes kept: the first `baseHeroes`, one more per town above the
 	/// first, never more than `maxHeroes`.
 	int baseHeroes = 3;
@@ -142,6 +149,9 @@ private:
 	std::map<int32_t, int> noMoves_;                 // walks sent today that moved nothing, per hero
 	std::map<std::pair<int32_t, int3>, int> visited_; // hero/tile visits made, by day
 	std::map<int32_t, int> gatherFailed_;            // hero -> day its hand-over to the main hero moved nothing
+	std::set<std::pair<int32_t, int>> loadedLogged_; // hero/day a carried load first kept the hero out of a fight (sw_CK)
+	std::set<std::pair<int32_t, int3>> stopGuards_;  // hero/step tiles a walk stopped short of today (sw_CC)
+	double paidSum_ = 0.0;                           // worth of the visits our heroes completed (sw_BX density)
 	std::map<int32_t, double> discovered_;           // object -> its worth to the main hero when first seen
 	double discoveredSum_ = 0.0;
 	int movesToday_ = 0;
@@ -171,6 +181,7 @@ private:
 	double onwardValue(const CGHeroInstance * hero, const int3 & tile) const;
 	bool dangerousFor(const CGHeroInstance * hero, const int3 & tile,
 		const std::vector<FoeInfo> & foes) const;
+	bool carriesForMain(const CGHeroInstance * hero, const CPathsInfo * paths) const;
 	static double armyOf(const CGHeroInstance * hero);
 	static std::string kindName(Target::Kind kind);
 };
