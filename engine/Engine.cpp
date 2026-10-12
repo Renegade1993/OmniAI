@@ -53,6 +53,31 @@ std::string fmt2(double v)
 	o << std::fixed << std::setprecision(2) << v;
 	return o.str();
 }
+
+// sw_BS (v2-exp-BS df494fc): what a carrier's stacks add to the main hero's
+// best seven creature types (Nullkiller 1's reinforcement rule).
+double reinforcement(const CCreatureSet & to, std::initializer_list<const CCreatureSet *> from)
+{
+	std::map<CreatureID, double> byType;
+	auto add = [&byType](const CCreatureSet & set)
+	{
+		for(const auto & slot : set.Slots())
+			if(slot.second && slot.second->getCreature())
+				byType[slot.second->getCreature()->getId()] += double(slot.second->getPower());
+	};
+	add(to);
+	for(const CCreatureSet * set : from)
+		if(set)
+			add(*set);
+	std::vector<double> values;
+	for(const auto & kv : byType)
+		values.push_back(kv.second);
+	std::sort(values.rbegin(), values.rend());
+	double best = 0.0;
+	for(size_t i = 0; i < values.size() && i < size_t(GameConstants::ARMY_SIZE); ++i)
+		best += values[i];
+	return std::max(0.0, best - double(to.getArmyStrength()));
+}
 }
 
 Engine::Engine(IEngineHost & host, Settings settings)
@@ -441,8 +466,11 @@ std::vector<Target> Engine::proposeTargets()
 		{
 			if(!h || h == main)
 				continue;
+			const bool bs = s_.on("BS");
 			const double army = armyOf(h);
-			if(army < std::max(300.0, 0.08 * armyOf(main)))
+			const double gain = bs ? reinforcement(*main, {h}) : army;
+			if(bs ? ((gain < 0.1 * armyOf(main) && gain < 20000.0) || gain < 500.0)
+				: army < std::max(300.0, 0.08 * armyOf(main)))
 				continue;
 			// A hand-over that moved nothing (the main hero's seven slots hold
 			// other creatures, and none of ours beats its weakest) benches the
@@ -450,14 +478,14 @@ std::vector<Target> Engine::proposeTargets()
 			// stands beside the main hero all day (V2M1S map 16, days 26 to 45:
 			// three heroes, 15 passes a day, the same 26636 never handed over).
 			const auto failed = gatherFailed_.find(h->id.getNum());
-			if(failed != gatherFailed_.end() && day_ - failed->second < 3)
+			if(failed != gatherFailed_.end() && day_ - failed->second < (bs ? 1 : 3))
 				continue;
 			Target t;
 			t.kind = Target::Kind::Gather;
 			t.id = main->id;
 			t.tile = main->visitablePos();
 			t.onlyHero = h->id.getNum();
-			t.reward = s_.gatherWorth * army;
+			t.reward = s_.gatherWorth * gain;
 			t.name = "army to " + main->getNameTranslated();
 			out.push_back(t);
 		}
@@ -1343,6 +1371,9 @@ bool Engine::execute(const std::vector<Option> & plan, const std::vector<Target>
 			}
 			if(pricedEnd && tile == t.tile)
 				break;
+			// sw_CF (v2-exp-CF): the walk's first step on the hero's own tile (a teleporter) is not a guarded step.
+			if(s_.on("CF") && i == 0 && tile == hero->visitablePos())
+				continue;
 			const CArmedInstance * foe = host_.guardOnStep(tile, hero);
 			if(!foe)
 				continue;
@@ -1353,7 +1384,8 @@ bool Engine::execute(const std::vector<Option> & plan, const std::vector<Target>
 				+ ": guard " + foe->getObjectName() + " (" + fmt0(double(foe->getArmyStrength()))
 				+ ") at step " + std::to_string(i + 1) + " of " + std::to_string(steps.size()));
 			stopGuards_.insert({o.hero, tile});
-			steps.resize(i);
+			const bool ownFirst = s_.on("CF") && hero->convertToVisitablePos(steps.front()) == hero->visitablePos();
+			steps.resize(i == 1 && ownFirst ? 0 : i);
 			break;
 		}
 		if(steps.empty())
@@ -1365,6 +1397,14 @@ bool Engine::execute(const std::vector<Option> & plan, const std::vector<Target>
 		const int3 before = hero->visitablePos();
 		const int mpBefore = hero->movementPointsRemaining();
 		const double armyBefore = armyOf(hero);
+		// sw_BS: a gather's success is read on the main hero, not the carrier.
+		const CGHeroInstance * gatherTo = t.kind == Target::Kind::Gather ? cb.getHero(t.id) : nullptr;
+		const double mainBefore = gatherTo ? armyOf(gatherTo) : 0.0;
+		auto mainGained = [&]() -> double
+		{
+			const CGHeroInstance * m = cb.getHero(t.id);
+			return m ? armyOf(m) - mainBefore : 0.0;
+		};
 		host_.logLine("   V2 p" + std::to_string(pass) + " " + hero->getNameTranslated()
 			+ (o.hero == mainHero_ ? "*" : "") + " " + kindName(t.kind) + " " + t.name
 			+ " at " + t.tile.toString() + " r=" + fmt0(o.reward) + " loss=" + fmt0(o.loss)
@@ -1432,19 +1472,21 @@ bool Engine::execute(const std::vector<Option> & plan, const std::vector<Target>
 			{
 				// The walk's last step onto the main hero opens the exchange.
 				bool exchanged = hero->convertToVisitablePos(steps.back()) == main->visitablePos();
-				if(armyOf(hero) > 0.9 * armyBefore && hero->movementPointsRemaining() > 0)
+				const bool bs = s_.on("BS");
+				if((bs ? mainGained() < 1.0 : armyOf(hero) > 0.9 * armyBefore) && hero->movementPointsRemaining() > 0)
 				{
 					host_.move(hero, {hero->convertFromVisitablePos(main->visitablePos())});
 					hero = cb.getHero(ObjectInstanceID(o.hero));
 					exchanged = true;
 				}
-				if(hero && armyOf(hero) <= 0.9 * armyBefore)
+				if(hero && (bs ? mainGained() >= 1.0 : armyOf(hero) <= 0.9 * armyBefore))
 					host_.logLine("   V2 GATHER " + hero->getNameTranslated() + " handed "
-						+ fmt0(armyBefore - armyOf(hero)) + " of " + fmt0(armyBefore) + " to " + main->getNameTranslated());
+						+ fmt0(bs ? mainGained() : armyBefore - armyOf(hero)) + " of " + fmt0(armyBefore) + " to " + main->getNameTranslated());
 				else if(hero && exchanged)
 				{
 					host_.logLine("   V2 GATHER refused: " + hero->getNameTranslated() + " still carries "
-						+ fmt0(armyOf(hero)) + " after the exchange, no gather for three days");
+						+ fmt0(armyOf(hero)) + (bs ? " after the exchange, no gather until tomorrow"
+							: " after the exchange, no gather for three days"));
 					gatherFailed_[o.hero] = day_;
 				}
 				else if(hero)

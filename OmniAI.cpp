@@ -10934,6 +10934,49 @@ void OmniAI::showMapObjectSelectDialog(QueryID askID, const Component & icon,
 	executeAsync("objectSelect", [this, askID, answer]{ answerQuery(askID, answer); });
 }
 
+bool OmniAI::higherBaseDwellingOpen(const CGTownInstance * town, int level, int top) const
+{
+	// sw_BP (v2-exp-BP, top 6) and sw_CD (v2-exp-CD, top 7): a base dwelling
+	// above `level`, up to `top`, that is unbuilt and not blocked by a resource
+	// we neither hold nor mine.
+	const auto * t = town ? town->getTown() : nullptr;
+	if(!t)
+		return false;
+	bool minesRead = false;
+	int mines[GameConstants::RESOURCE_QUANTITY] = {};
+	const TResources held = cb->getResourceAmount();
+	for(int higher = level + 1; higher < std::min(top, int(t->creatures.size())); ++higher)
+	{
+		const BuildingID bid = BuildingID::getDwellingFromLevel(higher, 0);
+		if(town->hasBuilt(bid) || !t->buildings.count(bid))
+			continue;
+		const TResources & need = t->buildings.at(bid)->resources;
+		bool blocked = false;
+		for(int r = 0; r < GameConstants::RESOURCE_QUANTITY && !blocked; ++r)
+		{
+			if(r == EGameResID::GOLD || need[r] <= held[r])
+				continue;
+			if(!minesRead)
+			{
+				for(const CGObjectInstance * obj : cb->getAllVisitableObjs())
+					if(obj && obj->ID == Obj::MINE && obj->tempOwner == playerID)
+						if(const auto * m = dynamic_cast<const CGMine *>(obj))
+						{
+							const int res = m->producedResource.getNum();
+							if(res >= 0 && res < GameConstants::RESOURCE_QUANTITY)
+								++mines[res];
+						}
+				minesRead = true;
+			}
+			if(mines[r] == 0)
+				blocked = true;
+		}
+		if(!blocked)
+			return true;
+	}
+	return false;
+}
+
 double OmniAI::buildingValue(const CGTownInstance * town, const BuildingID & id) const
 {
 	// Everything is expressed in army value, the same units the danger check
@@ -11050,6 +11093,8 @@ double OmniAI::buildingValue(const CGTownInstance * town, const BuildingID & id)
 				if(base)
 					worth = double(growth) * double(std::max(0,
 						cre->getAIValue() - base->getAIValue())) * WEEKS_AHEAD;
+				if((sw("BP") || sw("CD")) && higherBaseDwellingOpen(town, level, sw("CD") ? 7 : 6))
+					worth = 0.0;
 			}
 			value += worth;
 		}
@@ -11200,7 +11245,25 @@ int OmniAI::surplusGold() const
 	return cb->getResourceAmount(EGameResID::GOLD) - need;
 }
 
-void OmniAI::upgradeArmy(const CArmedInstance * army)
+double OmniAI::stockRate(const CGTownInstance * town) const
+{
+	// sw_BL (v2-exp-BL): the best army per gold the town's stock offers.
+	double rate = 80.0 / 60.0;
+	if(!town)
+		return rate;
+	for(const auto & level : town->creatures)
+	{
+		if(level.first == 0 || level.second.empty())
+			continue;
+		const auto * cre = level.second.back().toCreature();
+		const int each = cre ? cre->getFullRecruitCost()[EGameResID::GOLD] : 0;
+		if(each > 0)
+			rate = std::max(rate, double(std::max(0, cre->getAIValue())) / double(each));
+	}
+	return rate;
+}
+
+void OmniAI::upgradeArmy(const CArmedInstance * army, double beatRate)
 {
 	// Port of Nullkiller's makePossibleUpgrades (AIGateway.cpp:808), paid
 	// from surplus only. An upgrade is the best army-per-gold on offer once
@@ -11249,13 +11312,23 @@ void OmniAI::upgradeArmy(const CArmedInstance * army)
 			continue;
 		const TResources cost = info.getUpgradeCostsFor(best) * s->getCount();
 		TResources free = cb->getResourceAmount();
-		free[EGameResID::GOLD] = std::max(0, surplusGold());
+		if(beatRate < 0.0)
+			free[EGameResID::GOLD] = std::max(0, surplusGold());
+		else
+		{
+			// sw_BL: before the purchase, only an upgrade that beats the stock per gold.
+			const double gain = double(bestValue - s->getCreature()->getAIValue()) * double(s->getCount());
+			const int gold = cost[EGameResID::GOLD];
+			if(gold > 0 && gain / double(gold) < beatRate)
+				continue;
+		}
 		if(!free.canAfford(cost))
 			continue;
 		decisionLog_->line("  UPGRADE " + std::to_string(s->getCount()) + " "
 			+ s->getCreature()->getNamePluralTranslated() + " to "
 			+ best.toCreature()->getNamePluralTranslated() + " for "
-			+ std::to_string(cost[EGameResID::GOLD]) + " gold");
+			+ std::to_string(cost[EGameResID::GOLD]) + " gold"
+			+ (beatRate < 0.0 ? "" : " (before buying)"));
 		cb->upgradeCreature(army, SlotID(i), best);
 	}
 }
@@ -11731,6 +11804,8 @@ void OmniAI::heroVisitsTown(const CGHeroInstance *hero, const CGTownInstance *to
 		// is already gone.
 		if(h->id.getNum() == fieldHeroId_ || cb->getHeroesInfo().size() <= 1)
 			collectGarrison(t, h);
+		if(engineV2_ && sw("BL") && (h->id.getNum() == fieldHeroId_ || h->id.getNum() == secondFieldId_))
+			upgradeArmy(h, stockRate(t));
 		recruitFromDwelling(t, h);
 		if(h->id.getNum() == fieldHeroId_ || h->id.getNum() == secondFieldId_)
 			upgradeArmy(h);
@@ -11873,6 +11948,8 @@ void OmniAI::recruitInAllTowns()
 			collectGarrison(town, buyer);
 			decisionLog_->detail("buying what " + town->getNameTranslated()
 				+ " offers for " + buyer->getNameTranslated());
+			if(engineV2_ && sw("BL"))
+				upgradeArmy(buyer, stockRate(town));
 			recruitFromDwelling(town, buyer);
 			upgradeArmy(buyer);
 			continue;
@@ -12387,7 +12464,27 @@ std::shared_ptr<const CPathsInfo> OmniAI::paths(const CGHeroInstance * hero)
 
 std::vector<int3> OmniAI::routeSteps(const CPathsInfo * p, const CGHeroInstance * hero, const int3 & target)
 {
-	return stepsToward(const_cast<CPathsInfo *>(p), hero, target);
+	std::vector<int3> steps = stepsToward(const_cast<CPathsInfo *>(p), hero, target);
+	// sw_CF (v2-exp-CF): a hero standing on a teleporter whose path starts
+	// with the teleport gets the two steps stepsToward leaves out.
+	if(!steps.empty() || !hero || !cb || !sw("CF"))
+		return steps;
+	CGPath path;
+	if(!p || !p->getPath(path, target) || path.nodes.size() < 2)
+		return steps;
+	const int3 hp = hero->visitablePos();
+	const CGPathNode & first = path.nodes[path.nodes.size() - 2];
+	if(path.nodes.back().coord != hp || !first.isTeleportAction() || first.turns != 0)
+		return steps;
+	bool onTeleport = false;
+	for(const CGObjectInstance * obj : cb->getVisitableObjs(hp, false))
+		if(dynamic_cast<const CGTeleport *>(obj))
+			onTeleport = true;
+	if(!onTeleport)
+		return steps;
+	steps.push_back(hero->convertFromVisitablePos(hp));
+	steps.push_back(hero->convertFromVisitablePos(first.coord));
+	return steps;
 }
 
 bool OmniAI::move(const CGHeroInstance * hero, const std::vector<int3> & steps)

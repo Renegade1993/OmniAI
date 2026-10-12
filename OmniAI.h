@@ -334,6 +334,7 @@ private:
 	/// town's growth, markets from what they unblock, and the tavern from
 	/// the hero it can replace.
 	double buildingValue(const CGTownInstance * town, const BuildingID & id) const;
+	bool higherBaseDwellingOpen(const CGTownInstance * town, int level, int top) const;
 
 	void buildInTown(const CGTownInstance * town);
 	void buildInAllTowns();
@@ -353,7 +354,8 @@ private:
 	int surplusGold() const;
 	/// Upgrade this army's stacks in place, best upgrade first, paid from
 	/// surplus gold only. The army must be in a town that offers them.
-	void upgradeArmy(const CArmedInstance * army);
+	void upgradeArmy(const CArmedInstance * army, double beatRate = -1.0);
+	double stockRate(const CGTownInstance * town) const;
 	/// buildReserveTotal() as of the last dawn build pass, for callbacks on
 	/// the network thread that must not read the map above.
 	std::atomic<int> buildReserveCached_{0};
