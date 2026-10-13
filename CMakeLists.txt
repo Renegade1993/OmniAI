@@ -44,8 +44,17 @@ if(NOT VCMI_IN_TREE)
 	endif()
 
 	# Import library generated once by gen_import_lib.bat into resources/.
-	set(RESOURCES "${CMAKE_CURRENT_SOURCE_DIR}/../resources")
-	set(VCMI_IMPORT_LIB "${RESOURCES}/VCMI_lib.lib")
+	if(NOT DEFINED RESOURCES)
+		set(RESOURCES "${CMAKE_CURRENT_SOURCE_DIR}/../resources")
+	endif()
+	if(NOT DEFINED VCMI_IMPORT_LIB)
+		set(VCMI_IMPORT_LIB "${RESOURCES}/VCMI_lib.lib")
+	endif()
+	# DMB (October 12th): a build against DMB's engine names its headers (VCMI_ROOT), its import library
+	# (VCMI_IMPORT_LIB) and OMNIAI_DMB_ABI, which puts DMB_AI_ABI_EXPORTS in main.cpp.
+	if(OMNIAI_DMB_ABI)
+		add_compile_definitions(OMNIAI_DMB_ABI)
+	endif()
 	if(NOT EXISTS "${VCMI_IMPORT_LIB}")
 		message(FATAL_ERROR "VCMI_lib.lib missing. Run OmniAI/gen_import_lib.bat from a VS dev prompt once.")
 	endif()

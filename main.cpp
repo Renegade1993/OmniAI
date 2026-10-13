@@ -17,6 +17,12 @@
 
 static const char * const g_cszAiName = "OmniAI 0.1";
 
+#ifdef OMNIAI_DMB_ABI
+// DMB refuses an AI library that does not carry its AI ABI number (lib/modding/AIAbi.h, DMB's AI SDK).
+#include "modding/AIAbi.h"
+DMB_AI_ABI_EXPORTS
+#endif
+
 extern "C" DLL_EXPORT int GetGlobalAiVersion()
 {
 	return AI_INTERFACE_VER;
