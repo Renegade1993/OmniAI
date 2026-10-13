@@ -372,14 +372,57 @@ void Engine::pickMainHero()
 	CCallback & cb = host_.game();
 	const CGHeroInstance * current = mainHero_ >= 0 ? cb.getHero(ObjectInstanceID(mainHero_)) : nullptr;
 	const CGHeroInstance * best = nullptr;
-	for(const CGHeroInstance * h : cb.getHeroesInfo())
-		if(h && (!best || h->getTotalStrength() > best->getTotalStrength()))
-			best = h;
-	// Keep the incumbent unless another hero is plainly stronger, so the role
-	// (and the army that flows to it) does not swap on one week's recruits.
-	if(current && best && best != current
-		&& double(best->getTotalStrength()) < 1.3 * double(current->getTotalStrength()))
-		best = current;
+	if(s_.on("CL"))
+	{
+		// sw_CL (v2-exp-CL 13b0fc2, CL2): the army moves between heroes, a
+		// hero's levels and primary skills do not. A hero is scored by its
+		// own fighting strength times the army that can pool on it: its own
+		// and every other hero's that reaches it inside the gather horizon.
+		// On BIN, 64% of main-role switches went to a level-1 hero.
+		const auto heroes = cb.getHeroesInfo();
+		std::map<int32_t, std::shared_ptr<const CPathsInfo>> pathsOf;
+		for(const CGHeroInstance * o : heroes)
+			if(o)
+				pathsOf[o->id.getNum()] = host_.paths(o);
+		auto value = [&](const CGHeroInstance * h) -> double
+		{
+			double pool = armyOf(h);
+			for(const CGHeroInstance * o : heroes)
+			{
+				if(!o || o == h)
+					continue;
+				const auto & po = pathsOf[o->id.getNum()];
+				const CGPathNode * n = po ? po->getPathInfo(h->visitablePos()) : nullptr;
+				if(n && n->reachable() && double(n->turns) <= s_.horizonDays)
+					pool += armyOf(o);
+			}
+			return h->getHeroStrength() * pool;
+		};
+		double bestValue = -1.0;
+		for(const CGHeroInstance * h : heroes)
+			if(h)
+			{
+				const double v = value(h);
+				if(v > bestValue)
+				{
+					bestValue = v;
+					best = h;
+				}
+			}
+		if(current && best && best != current && bestValue < 1.3 * value(current))
+			best = current;
+	}
+	else
+	{
+		for(const CGHeroInstance * h : cb.getHeroesInfo())
+			if(h && (!best || h->getTotalStrength() > best->getTotalStrength()))
+				best = h;
+		// Keep the incumbent unless another hero is plainly stronger, so the role
+		// (and the army that flows to it) does not swap on one week's recruits.
+		if(current && best && best != current
+			&& double(best->getTotalStrength()) < 1.3 * double(current->getTotalStrength()))
+			best = current;
+	}
 	const int32_t id = best ? best->id.getNum() : -1;
 	if(id != mainHero_)
 	{
