@@ -1731,6 +1731,10 @@ void OmniAI::logTruth()
 			  << " " << best->visitablePos().toString();
 		// After the best-hero block so the parsers' "maxL=N best=" shape holds.
 		o << " manned=" << manned;
+		// Rare stocks (October 13th, sw_SP's build; logging only): the
+		// rare-resource inflow could not be read from any earlier log.
+		o << " rare=" << ps.resources[EGameResID::MERCURY] << "/" << ps.resources[EGameResID::SULFUR]
+		  << "/" << ps.resources[EGameResID::CRYSTAL] << "/" << ps.resources[EGameResID::GEMS];
 		if(!fresh.str().empty())
 			o << " built:" << fresh.str();
 		decisionLog_->line(o.str());
@@ -1897,6 +1901,39 @@ void OmniAI::updateResourceScarcity()
 		o << " " << GameConstants::RESOURCE_NAMES[i] << "[blocked]";
 	}
 
+	// sw_SP: a resource an unbuilt base dwelling lacks is worth what that
+	// dwelling raises each week, spread over the missing units at face price
+	// (100 wood and ore, 200 the rare four, 1.2 army per gold): a gem pile
+	// that opens a dragon cave is priced as the dragons, not as four gems.
+	if(sw("SP"))
+	{
+		const TResources held = cb->getResourceAmount();
+		for(const CGTownInstance * town : cb->getTownsInfo())
+		{
+			if(!town || town->tempOwner != playerID || !town->getTown())
+				continue;
+			const auto * ct = town->getTown();
+			for(int level = 0; level < int(ct->creatures.size()); ++level)
+			{
+				const BuildingID bid = BuildingID::getDwellingFromLevel(level, 0);
+				if(town->hasBuilt(bid) || !ct->buildings.count(bid) || ct->creatures[level].empty())
+					continue;
+				const auto * cre = ct->creatures[level][0].toCreature();
+				if(!cre)
+					continue;
+				const double weekly = double(std::max(1, cre->getGrowth())) * double(std::max(0, cre->getAIValue()));
+				const TResources & need = ct->buildings.at(bid)->resources;
+				for(int r = 0; r < 6; ++r)
+				{
+					const int missing = need[r] - held[r];
+					if(missing <= 0)
+						continue;
+					const double face = (r == EGameResID::WOOD || r == EGameResID::ORE) ? 100.0 : 200.0;
+					mult[r] = std::max(mult[r], 1.0 + weekly / (double(missing) * face * 1.2));
+				}
+			}
+		}
+	}
 	scarcity_ = mult;
 	evaluator_->setScarcity(mult);
 	if(anyShort)
@@ -11093,7 +11130,8 @@ double OmniAI::buildingValue(const CGTownInstance * town, const BuildingID & id)
 				if(base)
 					worth = double(growth) * double(std::max(0,
 						cre->getAIValue() - base->getAIValue())) * WEEKS_AHEAD;
-				if((sw("BP") || sw("CD")) && higherBaseDwellingOpen(town, level, sw("CD") ? 7 : 6))
+				if((sw("BP") || sw("CD") || sw("SP"))
+					&& higherBaseDwellingOpen(town, level, (sw("CD") || sw("SP")) ? 7 : 6))
 					worth = 0.0;
 			}
 			value += worth;
@@ -11142,7 +11180,9 @@ double OmniAI::buildingValue(const CGTownInstance * town, const BuildingID & id)
 			// extra dwelling this gold would buy. Score it to climb, not to
 			// sit at level 1 - each level toward 3 is worth more, and a hero
 			// that already knows Town Portal makes the whole chain moot.
-			if(learners > 0)
+			// sw_SP: the guild's spells wait while a base dwelling is still
+			// open here; supply, not gold, is what holds the army back.
+			if(learners > 0 && !(sw("SP") && higherBaseDwellingOpen(town, -1, 7)))
 			{
 				bool portalKnown = false;
 				int bestSpellLevel = 0;
